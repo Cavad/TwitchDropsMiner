@@ -331,6 +331,8 @@ class NativeChrome:
     LOGIN_URL = "https://www.twitch.tv/login"
     LOGIN_MESSAGE = "login"
     LOGIN_MISSING_CODE = "HELPER_LOGIN_MISSING"
+    HIDE_CAPTURE_STARTUP = True
+    PROFILE_CLEANUP_DELAYS = (0, .25, .5, 1, 2, 2, 2)
 
     def __init__(self, executable: Path | None = None, *, startup_timeout: float = 30):
         self.executable = executable
@@ -341,6 +343,8 @@ class NativeChrome:
         self._closing: asyncio.Task[None] | None = None
         self._capturing = False
         self._verified = False
+        self.background_capture = False
+        self._window_hider: asyncio.Task[None] | None = None
 
     @staticmethod
     def find_chrome() -> Path:
@@ -437,6 +441,11 @@ class NativeChrome:
         options: dict[str, Any] = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
         if sys.platform == "win32":
             options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            if self._capturing and self.background_capture and self.HIDE_CAPTURE_STARTUP:
+                startup = subprocess.STARTUPINFO()
+                startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startup.wShowWindow = subprocess.SW_HIDE
+                options["startupinfo"] = startup
         else:
             options["start_new_session"] = True
         port = self.available_port() if self._capturing else 0
@@ -481,6 +490,7 @@ class NativeChrome:
             temporary.mkdir(mode=0o700)
             self._launch_browser(executable)
             await self._wait_ready()
+            await self._start_capture_hider()
             return self
         except BaseException as error:
             await self.close()
@@ -514,6 +524,44 @@ class NativeChrome:
         self._verified = False
         self._launch_browser(self.find_executable())
         await self._wait_ready()
+        await self._start_capture_hider()
+
+    def _owns_pid(self, pid: int) -> bool:
+        return self.process is not None and self.process.poll() is None and pid == self.process.pid
+
+    async def finish_login(self) -> None:
+        if sys.platform != "win32" or self._capturing:
+            raise SessionError("HELPER_STATE")
+        if self.process is None or self.process.poll() is not None:
+            return
+        from src.auth.windows_browser import OwnedBrowserWindows
+
+        manual = self.process
+        windows = OwnedBrowserWindows(
+            lambda pid: self.process is manual and not self._capturing and self._owns_pid(pid),
+        )
+        for _attempt in range(25):
+            if self.process is None or self.process.poll() is not None or self._capturing:
+                return
+            await asyncio.to_thread(windows.finish)
+            await asyncio.sleep(.2)
+        raise SessionError("HELPER_BROWSER")
+
+    async def _start_capture_hider(self) -> None:
+        if (sys.platform != "win32" or not self.background_capture or not self._capturing
+                or not self._verified or self._window_hider is not None):
+            return
+        from src.auth.windows_browser import OwnedBrowserWindows
+
+        captured = self.process
+        windows = OwnedBrowserWindows(
+            lambda pid: self.process is captured and self._capturing and self._verified and self._owns_pid(pid),
+        )
+        await asyncio.to_thread(windows.hide)
+
+        self._window_hider = asyncio.create_task(windows.keep_hidden(
+            lambda: self.process is not None and self.process.poll() is None,
+        ))
 
     async def _check_login(self) -> None:
         if self.process is None or self.process.poll() is not None:
@@ -585,6 +633,10 @@ class NativeChrome:
 
     async def _close(self) -> None:
         failed = False
+        if self._window_hider is not None:
+            self._window_hider.cancel()
+            await asyncio.gather(self._window_hider, return_exceptions=True)
+            self._window_hider = None
         if self.process is not None:
             try:
                 with suppress(SessionError, aiohttp.ClientError, TimeoutError, OSError):
@@ -605,10 +657,14 @@ class NativeChrome:
     async def _remove_profile(self) -> None:
         if self.profile is not None:
             profile = self.profile
-            for attempt in range(4):
+            for attempt, delay in enumerate(self.PROFILE_CLEANUP_DELAYS):
+                if delay:
+                    await asyncio.sleep(delay)
                 try:
                     # Python 3.12 is required; the repository's Mypy target is still 3.10.
-                    shutil.rmtree(profile, onexc=self._remove_readonly)  # type: ignore[call-arg]
+                    # Windows browser/antivirus handles can outlive the browser.
+                    # Large profiles and deletion retries must not block the miner loop.
+                    await asyncio.to_thread(shutil.rmtree, profile, onexc=self._remove_readonly)  # type: ignore[call-arg]
                     self.profile = None
                     break
                 except OSError:
@@ -616,9 +672,8 @@ class NativeChrome:
                     if not profile.exists():
                         self.profile = None
                         break
-                    if attempt == 3:
+                    if attempt == len(self.PROFILE_CLEANUP_DELAYS) - 1:
                         raise SessionError("HELPER_PROFILE_CLEANUP") from None
-                    await asyncio.sleep(.25)
 
     def _remove_readonly(self, function: Callable[..., Any], path: str, error: BaseException) -> None:
         target = Path(path)
@@ -668,6 +723,9 @@ class NativeFirefox(NativeChrome):
     """Use installed Firefox while sharing owned-process/profile cleanup."""
 
     LOGIN_MISSING_CODE = "HELPER_FIREFOX_LOGIN"
+    # Firefox needs its normal window initialized before BiDi is ready. Hide it
+    # after validating the owned browser, before any campaign target is created.
+    HIDE_CAPTURE_STARTUP = False
 
     def __init__(self, executable: Path | None = None, *, startup_timeout: float = 30):
         super().__init__(executable, startup_timeout=startup_timeout)
@@ -884,6 +942,7 @@ class NativeLoginHelper:
         self.insecure, self.ssl_context = insecure, HelperHTTP.trust(ca_file)
         self.browser_factory, self.exporter_factory = browser_factory, exporter_factory
         self.clock, self.report = clock, report
+        self.browser_changed: Callable[[Any], None] = lambda _browser: None
 
     async def run(self) -> None:
         phase = "helper_connect"
@@ -897,6 +956,7 @@ class NativeLoginHelper:
                 phase = "browser_start"
                 async with self.browser_factory() as browser:
                     try:
+                        self.browser_changed(browser)
                         phase = "browser_login"
                         self.report(getattr(browser, "LOGIN_MESSAGE", "login"))
                         await browser.wait_authenticated(timeout=max(1, ticket.expires_at - self.clock() - 15))
@@ -914,6 +974,7 @@ class NativeLoginHelper:
                     except Exception as error:
                         raise self._unexpected_error(error, phase) from None
                     finally:
+                        self.browser_changed(None)
                         phase = "browser_cleanup"
             self.report("success")
         except SessionError as error:

@@ -44,7 +44,10 @@ def assert_failure(client, response, *, code, stage, reason=None, operation=None
     ("service error", "service"),
     ("private remote message and OAuth secret", "unknown"),
 ])
-def test_issue148_catalog_failure_identifies_phase_and_fixed_reason(protocol, phase, message, reason, caplog):
+def test_issue148_catalog_failure_identifies_phase_and_fixed_reason(protocol, phase, message, reason, caplog, monkeypatch):
+    from src.auth.recovery import SessionRecovery
+
+    monkeypatch.setattr(SessionRecovery, "DELAYS", (0, 0))
     client, _helper, _auth, issuer, session = protocol
     identity = {"client_id": ClientType.WEB.CLIENT_ID, "user_id": "42"}
     failed = catalog()
@@ -53,11 +56,14 @@ def test_issue148_catalog_failure_identifies_phase_and_fixed_reason(protocol, ph
     if phase == "issued_validation":
         replies.extend([catalog(), identity])
     replies.append(failed)
+    attempts = 3 if phase == "issued_validation" and reason in {"integrity", "service"} else 1
+    for _ in range(attempts - 1):
+        replies.extend([identity, failed])
     session._transport.request.side_effect = replies
     response = upload(client, connect_helper(client))
     assert response.status_code == 400
     assert_failure(client, response, code="CATALOG", stage=phase, reason=reason, operation="Campaigns")
-    assert issuer.issue.await_count == (phase == "issued_validation")
+    assert issuer.issue.await_count == (attempts if phase == "issued_validation" else 0)
     assert session.status()["state"] == "waiting" and session.seed() is None
     assert not session.path.exists()
     logged = [json.loads(record.getMessage().split("SESSION_DIAGNOSTIC ", 1)[1])

@@ -501,6 +501,16 @@ progress to an ignored drop while the miner intentionally targets another reward
 
 ### Authentication and integrated browser login
 
+- The local Windows desktop edition can opt into background native capture after a
+  manual sign-in profile is normally closed and its capture process is verified.
+  **Finish sign-in** sends WM_CLOSE only to live owned windows: freeze the manual
+  process identity and reject capture replacements. Firefox keeps its validated
+  launcher-child/executable ownership checks. Hidden SDK issuance is desktop-only
+  and uses a normal Windows browser; default source/platform modes stay unchanged.
+  Drain window workers through repeated cancellation before terminating the browser.
+  Preserve fresh issuance, identity/catalog validation and atomic installation; an
+  issued-proof rejection must not be reported as a successful connection.
+
 - The temporary interactive Chromium profile disables password saving before startup.
   Its bundled completion extension observes only Twitch login-cookie presence, closes
   the owned profile's windows normally, and never exports cookie values. Treat this as

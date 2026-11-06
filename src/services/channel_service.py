@@ -126,13 +126,14 @@ class ChannelService:
             default=order.rank(None),
         )
 
-    def _default_mining_priority(self, channel: Channel) -> tuple[int, int] | tuple[int, int, float, int]:
+    def _default_mining_priority(self, channel: Channel) -> tuple[float, ...]:
         """Selected games first; optional reward type/deadline before game order."""
         priority = self.get_priority(channel)
         settings = getattr(self._twitch, "settings", None)
         policy = RewardPriority(settings)
         fallback = settings is not None and getattr(settings, "priority_list_only", True) is False
-        if not fallback and not policy.enabled:
+        deadline_queue = getattr(self._twitch, "desktop_deadline_queue", False) is True and not policy.enabled
+        if not fallback and not policy.enabled and not deadline_queue:
             return (0, priority)
         selected_names = {name.lower() for name in getattr(settings, "games_to_watch", [])}
         candidates = [campaign for campaign in self._twitch.inventory
@@ -142,6 +143,15 @@ class ChannelService:
             and (campaign.game.is_special() or channel.drops_enabled)]
         selected = [campaign for campaign in candidates if campaign.game.name.lower() in selected_names]
         tier = 0 if not fallback or selected else 1
+        if deadline_queue:
+            # Rank the campaigns the channel can actually progress, including
+            # special categories, before viewer/ACL tie breakers choose a stream.
+            game_rank, deadline = min(
+                ((self._twitch.wanted_games.index(campaign.game), campaign.ends_at.timestamp())
+                 for campaign in (selected or candidates)),
+                default=(MAX_INT, float("inf")),
+            )
+            return (tier, game_rank, deadline)
         if not policy.enabled:
             return (tier, priority)
         rank, deadline = min((policy.campaign_key(campaign) for campaign in (selected or candidates)),

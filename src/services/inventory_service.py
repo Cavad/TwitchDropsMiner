@@ -281,6 +281,15 @@ class InventoryService:
                     self._twitch.wanted_games.index(campaign.game), campaign.remaining_minutes))
             if not campaigns:
                 return None
+            if getattr(self._twitch, "desktop_deadline_queue", False) is True and not policy.enabled:
+                # Native automatic mode keeps the effective game preferences first,
+                # then finishes the earlier-expiring campaign within that game.
+                campaigns = [campaign for campaign in campaigns if campaign.game in self._twitch.wanted_games]
+                campaigns.sort(key=lambda campaign: (
+                    self._twitch.wanted_games.index(campaign.game), campaign.ends_at, campaign.remaining_minutes,
+                ))
+                if not campaigns:
+                    return None
             order = getattr(self._twitch, "game_order", None)
             if isinstance(order, TemporaryGameOrder) and order.active:
                 # Stable: the temporary dashboard order first, then the rules above.

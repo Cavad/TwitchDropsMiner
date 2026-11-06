@@ -1,7 +1,24 @@
-# Twitch Drops Miner
+# Twitch Drops Miner — Windows desktop fork
+
+This fork of [rangermix/TwitchDropsMiner](https://github.com/rangermix/TwitchDropsMiner)
+adds a native Windows interface with browser sign-in, automatic campaign discovery,
+session recovery, a mining queue with deadline estimates, tray controls and local
+notifications. The desktop interface is in English. Upstream attribution and the MIT
+license are preserved; desktop support belongs to this fork.
+
+Download the Windows ZIP from [Releases](https://github.com/Cavad/TwitchDropsMiner/releases),
+extract it and run **Twitch Drops Miner.exe**. See the
+[desktop guide](docs/windows-desktop.md) for sign-in and settings.
+The [Windows build workflow](https://github.com/Cavad/TwitchDropsMiner/actions/workflows/desktop-windows.yml)
+runs core regressions, native tests and a packaged smoke check before uploading its
+EXE archive and SHA256 checksum. Smoke checks do not establish live Twitch acceptance
+or real reward accrual.
 
 Automatically earn timed Twitch Drops without downloading stream video or audio.
 Mining reads playlist metadata and checks segment response headers to keep bandwidth low.
+
+For the locally packaged Windows interface, see the [desktop guide](docs/windows-desktop.md)
+for sign-in, the automatic queue, tray controls and optional Windows startup.
 
 <p align="center">
   <a href="https://github.com/rangermix/TwitchDropsMiner/stargazers"><img src="https://img.shields.io/github/stars/rangermix/TwitchDropsMiner?style=for-the-badge&color=yellow" alt="GitHub stars"></a>

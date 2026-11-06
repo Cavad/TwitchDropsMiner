@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +37,7 @@ def _merge_vars(base_vars: dict[str, Any], vars: dict[str, Any]) -> None:
 
 # Base Paths - environment-specific resolution
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path(os.environ["TDM_DATA_DIR"]).expanduser().resolve() if os.environ.get("TDM_DATA_DIR") else PROJECT_ROOT / "data"
 
 # Ensure data directory exists
 if not DATA_DIR.exists():

@@ -185,6 +185,10 @@ it the renewal browser runs headless and the miner logs a warning each time it s
 Twitch can reject the session it issues, reported as `reason=headless_fallback`. The
 Docker image already includes these tools.
 
+On Windows, renewal also detects an installed Chromium or Google Chrome when no
+Chromium executable is on `PATH`. Use the desktop helper for interactive sign-in;
+the embedded login desktop requires Linux or Docker.
+
 Docker includes the tools needed for new interactive login. The integrated desktop requires a separate
 unprivileged browser user and private miner data/log permissions; the image configures
 these automatically. The [desktop helper](authentication.md#desktop-helper-fallback)

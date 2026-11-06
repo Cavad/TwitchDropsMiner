@@ -7,13 +7,21 @@ import json
 import logging
 import os
 import shutil
+import sys
 import time
 from collections.abc import Awaitable, Callable, Iterator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager, nullcontext
+from contextlib import (
+    AbstractAsyncContextManager,
+    asynccontextmanager,
+    contextmanager,
+    nullcontext,
+    suppress,
+)
 from dataclasses import replace
 from typing import Any
 
 from src.auth.imported_session import ImportedSession
+from src.auth.recovery import SessionRecovery
 from src.auth.server_renewal import OwnedChromium, SDKIssuer
 from src.auth.server_seed import ServerSeed
 from src.auth.session_bundle import SessionError
@@ -32,7 +40,7 @@ class SessionController:
                  on_change: Callable[[], None] = lambda: None):
         self.session, self.clock = session, clock
         self.issuer = issuer or SDKIssuer(OwnedChromium(
-            shutil.which("chromium") or shutil.which("chromium-browser") or "chromium",
+            self._browser_executable(),
             no_sandbox=os.name == "posix" and os.geteuid() == 0,
         ), diagnostics=getattr(session._transport, "diagnostics", None))
         self.activation, self.on_change = activation, on_change
@@ -46,6 +54,26 @@ class SessionController:
         self._renewal_error: str | None = None
         self._renewal_diagnostic: SessionDiagnostic | None = None
         self.session.on_renewal_needed = self.request_renewal
+        self.on_progress: Callable[[str, SessionDiagnostic | None, int], None] = lambda _phase, _diagnostic, _attempt: None
+
+    def _progress(self, phase: str, diagnostic: SessionDiagnostic | None = None, attempt: int = 0) -> None:
+        with suppress(Exception):
+            self.on_progress(phase, diagnostic, attempt)
+
+    @staticmethod
+    def _browser_executable() -> str:
+        executable = shutil.which("chromium") or shutil.which("chromium-browser")
+        if executable:
+            return executable
+        if sys.platform == "win32":
+            from src.auth.login_helper import NativeChrome, NativeChromium
+
+            for discover in (NativeChromium.find_chromium, NativeChrome.find_chrome):
+                try:
+                    return str(discover())
+                except SessionError:
+                    continue
+        return "chromium"
 
     def status(self) -> dict[str, Any]:
         return {"session": self.session.status(), "renewal_error": self._renewal_error,
@@ -55,8 +83,11 @@ class SessionController:
 
     @contextmanager
     def _phase(self, stage: str) -> Iterator[None]:
+        self._progress(stage)
         try:
             yield
+            if stage in ("issued_validation", "renewal_validation"):
+                self._progress("validated")
         except SessionError as error:
             error.annotate(stage=stage)
             if (stage in ("issued_validation", "renewal_validation") and error.code == "CATALOG"
@@ -64,6 +95,7 @@ class SessionController:
                 # The rejected proof came from the headless fallback (no xvfb-run).
                 error.diagnostic = replace(error.diagnostic, reason="headless_fallback")
             logging.getLogger(__name__).warning("SESSION_DIAGNOSTIC %s", json.dumps(error.diagnostic.to_dict(), sort_keys=True))
+            self._progress("failed", error.diagnostic)
             raise
         except Exception:
             failure = SessionError("HELPER_FAILED", stage=stage, reason="unexpected_exception")
@@ -103,15 +135,26 @@ class SessionController:
                 seed.cookie.require_fresh(self.clock())
             with self._phase("captured_validation"):
                 identity = await self.session._transport.validate(seed.bundle, None)
-            with self._phase("server_issuance"):
-                renewed = await self.issuer.issue(seed, initial=True)
-            current()
-            with self._phase("issued_validation"):
-                async with self.activation():
-                    result = await self.session.install(
-                        renewed.bundle.to_dict(), expected_user_id=identity.user_id,
-                        sdk_cookie=renewed.cookie, replace=True, authorized=current,
-                    )
+            for attempt in range(len(SessionRecovery.DELAYS) + 1):
+                current()
+                seed.bundle.require_fresh(self.clock())
+                seed.cookie.require_fresh(self.clock())
+                try:
+                    with self._phase("server_issuance"):
+                        renewed = await self.issuer.issue(seed, initial=True)
+                    current()
+                    with self._phase("issued_validation"):
+                        async with self.activation():
+                            result = await self.session.install(
+                                renewed.bundle.to_dict(), expected_user_id=identity.user_id,
+                                sdk_cookie=renewed.cookie, replace=True, authorized=current,
+                            )
+                    break
+                except SessionError as error:
+                    if attempt >= len(SessionRecovery.DELAYS) or not SessionRecovery.retryable(error):
+                        raise
+                    self._progress("retrying", error.diagnostic, attempt + 1)
+                    await asyncio.sleep(SessionRecovery.DELAYS[attempt])
             self._renewal_error = None
             self._renewal_diagnostic = None
             self._wake.set()

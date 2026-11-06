@@ -12,6 +12,7 @@ import re
 import secrets
 import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -74,11 +75,13 @@ class OwnedChromium:
         "os.execvp(sys.argv[3],sys.argv[3:])\n"
     )
 
-    def __init__(self, executable: str, *, no_sandbox: bool = False, startup_timeout: float = 20):
+    def __init__(self, executable: str, *, no_sandbox: bool = False, startup_timeout: float = 20,
+                 background: bool = False):
         self.executable, self.no_sandbox = executable, no_sandbox
         self.startup_timeout = startup_timeout
         # Whether the last Linux start lacked xvfb-run; Twitch can reject headless proofs.
         self.headless_fallback = False
+        self.background = background
 
     async def wait_ready(self, process: asyncio.subprocess.Process, profile: Path) -> str:
         async with asyncio.timeout(self.startup_timeout):  # type: ignore[attr-defined]
@@ -136,20 +139,36 @@ class OwnedChromium:
     @asynccontextmanager
     async def process(self, args: list[str], profile: Path, **options: Any) -> AsyncIterator[asyncio.subprocess.Process]:
         process = None
+        hider = None
         try:
-            process = await asyncio.create_subprocess_exec(
-                *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-                start_new_session=os.name == "posix",
-                env={**os.environ, "XDG_CONFIG_HOME": str(profile / "config"),
-                     "XDG_CACHE_HOME": str(profile / "cache")},
-                **options,
-            )
+            from src.auth.login_helper import NativeChrome
+
+            with NativeChrome.external_libraries() as environment:
+                process = await asyncio.create_subprocess_exec(
+                    *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                    start_new_session=os.name == "posix",
+                    env={**environment, "XDG_CONFIG_HOME": str(profile / "config"),
+                         "XDG_CACHE_HOME": str(profile / "cache")},
+                    **options,
+                )
+            if os.name == "nt" and self.background:
+                from src.auth.windows_browser import OwnedBrowserWindows
+
+                owner = process
+                windows = OwnedBrowserWindows(lambda pid: owner.returncode is None and pid == owner.pid)
+
+                hider = asyncio.create_task(windows.keep_hidden(lambda: owner.returncode is None))
             yield process
         except OSError:
             raise SessionError("BROWSER_START") from None
         finally:
-            if process is not None:
-                await self.finish_stop(process)
+            try:
+                if hider is not None:
+                    hider.cancel()
+                    await OwnedBrowserWindows.drain(asyncio.gather(hider, return_exceptions=True))
+            finally:
+                if process is not None:
+                    await self.finish_stop(process)
 
     @asynccontextmanager
     async def start(self) -> AsyncIterator[BrowserTargets]:
@@ -178,10 +197,17 @@ class OwnedChromium:
                 args.append("--window-size=1200,760")
                 display_args = [display_runner, "-a", "-f", str(profile / "Xauthority"),
                                 "-s", "-screen 0 1280x800x24 -nolisten tcp"]
-            else:
+            elif not (os.name == "nt" and self.background):
                 args.insert(1, "--headless=new")
             if os.name != "posix":
-                async with self.process(args, profile) as process:
+                options: dict[str, Any] = {}
+                if self.background:
+                    startup = subprocess.STARTUPINFO()
+                    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startup.wShowWindow = subprocess.SW_HIDE
+                    options["startupinfo"] = startup
+                    args.insert(1, "--window-position=-32000,-32000")
+                async with self.process(args, profile, **options) as process:
                     try:
                         address = await self.wait_ready(process, profile)
                     except (OSError, ValueError, TimeoutError):

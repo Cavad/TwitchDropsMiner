@@ -15,9 +15,91 @@ from src.config import ClientType
 from tests.test_imported_session import bundle_data, catalog
 
 
+@pytest.mark.parametrize("available", ["chromium", "chrome", "missing"])
+def test_windows_renewal_discovers_native_browser(monkeypatch, available):
+    from pathlib import Path
+
+    from src.auth import session_controller
+    from src.auth.login_helper import NativeChrome, NativeChromium
+
+    monkeypatch.setattr(session_controller.sys, "platform", "win32")
+    monkeypatch.setattr(session_controller.shutil, "which", lambda name: None)
+
+    def discover(name):
+        if name == available:
+            return Path("C:/Browsers") / name / "chrome.exe"
+        raise SessionError("HELPER_BROWSER_MISSING")
+
+    monkeypatch.setattr(NativeChromium, "find_chromium", lambda: discover("chromium"))
+    monkeypatch.setattr(NativeChrome, "find_chrome", lambda: discover("chrome"))
+    expected = "chromium" if available == "missing" else str(Path("C:/Browsers") / available / "chrome.exe")
+    assert SessionController._browser_executable() == expected
+
+
+def test_renewal_prefers_browser_on_path(monkeypatch):
+    from src.auth import session_controller
+
+    monkeypatch.setattr(session_controller.shutil, "which", lambda name: "custom-browser.exe")
+    assert SessionController._browser_executable() == "custom-browser.exe"
+
+
 def seed(now=1000, token="oauth-42", integrity="initial-integrity"):
     return ServerSeed(SessionBundle.from_dict(bundle_data(now, integrity, token), now=now),
                       SDKCookie("private-sdk-cookie", now + 86400))
+
+
+@pytest.mark.asyncio
+async def test_initial_recovery_reissues_and_validates_before_install(controller, monkeypatch):
+    from src.auth.recovery import SessionRecovery
+
+    monkeypatch.setattr(SessionRecovery, "DELAYS", (0, 0))
+    control, session, clock, issuer = controller
+    actual_issue = issuer.issue.side_effect
+    attempts = []
+
+    async def issue(previous, *, initial=False):
+        attempts.append(initial)
+        if len(attempts) < 3:
+            raise SessionError("SDK_ISSUANCE", reason="connection")
+        return await actual_issue(previous, initial=initial)
+
+    issuer.issue.side_effect = issue
+    phases = []
+    control.on_progress = lambda phase, diagnostic, attempt: phases.append(phase)
+    result = await control.accept(seed(), authorized=lambda: True)
+    assert result["state"] == "ready" and attempts == [True, True, True]
+    assert session._transport.request.await_count == 4
+    assert phases.count("retrying") == 2 and phases[-1] == "validated"
+
+
+@pytest.mark.asyncio
+async def test_initial_recovery_is_bounded_and_never_persists_rejected_seed(controller, monkeypatch):
+    from src.auth.recovery import SessionRecovery
+
+    monkeypatch.setattr(SessionRecovery, "DELAYS", (0, 0))
+    control, session, clock, issuer = controller
+    issuer.issue.side_effect = SessionError("SDK_ISSUANCE", reason="connection")
+    with pytest.raises(SessionError):
+        await control.accept(seed(), authorized=lambda: True)
+    assert issuer.issue.await_count == 3
+    assert not session.path.exists() and session.seed() is None
+
+
+@pytest.mark.asyncio
+async def test_revoked_authorization_during_retry_cannot_commit(controller, monkeypatch):
+    from src.auth.recovery import SessionRecovery
+
+    monkeypatch.setattr(SessionRecovery, "DELAYS", (0, 0))
+    control, session, clock, issuer = controller
+    authorized = [True]
+    def progress(phase, diagnostic, attempt):
+        if phase == "retrying":
+            authorized[0] = False
+    control.on_progress = progress
+    issuer.issue.side_effect = SessionError("SDK_ISSUANCE", reason="connection")
+    with pytest.raises(SessionError, match="STALE"):
+        await control.accept(seed(), authorized=lambda: authorized[0])
+    assert issuer.issue.await_count == 1 and not session.path.exists()
 
 
 @pytest.fixture

@@ -33,3 +33,6 @@ artifacts/
 
 # Private development plans, notes, and local verification records
 /.dev-notes/
+/release-assets/
+/core-tests.xml
+/desktop-tests.xml

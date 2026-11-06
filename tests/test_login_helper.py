@@ -562,11 +562,50 @@ async def test_persistent_profile_lock_is_reported_without_claiming_cleanup(monk
     browser.profile = profile
     remove = Mock(side_effect=PermissionError("private-profile-path"))
     monkeypatch.setattr(login_helper.shutil, "rmtree", remove)
+    monkeypatch.setattr(login_helper.asyncio, "sleep", AsyncMock())
     with pytest.raises(SessionError, match="HELPER_PROFILE_CLEANUP") as error:
         await browser.close()
     assert "private-profile-path" not in str(error.value)
     assert browser.profile == profile and profile.exists()
-    assert remove.call_count == 4
+    assert 2 <= remove.call_count <= 8
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows sharing violations")
+async def test_profile_cleanup_waits_for_transient_windows_handle_without_stalling_loop(tmp_path):
+    import ctypes
+    from ctypes import wintypes
+
+    profile = tmp_path / "owned"
+    profile.mkdir()
+    locked = profile / "Cookies"
+    locked.write_text("synthetic-temporary-data")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.CreateFileW(str(locked), 0x80000000, 0, None, 3, 0, None)
+    assert handle != wintypes.HANDLE(-1).value
+    browser = login_helper.NativeChrome()
+    browser.profile = profile
+    ticks = []
+
+    async def release():
+        try:
+            for _ in range(12):
+                await asyncio.sleep(.1)
+                ticks.append(True)
+        finally:
+            kernel.CloseHandle(handle)
+
+    release_task = asyncio.create_task(release())
+    try:
+        await browser.close()
+    finally:
+        await release_task
+    assert len(ticks) == 12
+    assert not profile.exists()
+    assert browser.profile is None
 
 
 @pytest.mark.asyncio

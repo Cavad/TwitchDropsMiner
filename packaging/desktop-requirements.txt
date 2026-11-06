@@ -1,0 +1,2 @@
+# Native Windows desktop UI. Runtime miner dependencies remain in uv.lock.
+PySide6==6.12.0
