@@ -46,6 +46,20 @@ class FakeEngine(QObject):
         return False
 
 
+@pytest.mark.parametrize("ci", [False, True])
+def test_packaged_verification_cli_routes_without_launching_miner(monkeypatch, tmp_path, ci):
+    import desktop_main
+    from desktop import verify
+
+    report = str(tmp_path / "report.json")
+    arguments = ["desktop_main.py", "--verify-build", report] + (["--ci"] if ci else [])
+    monkeypatch.setattr(sys, "argv", arguments)
+    run = Mock(return_value=0)
+    monkeypatch.setattr(verify, "run", run)
+    assert desktop_main.main() == 0
+    run.assert_called_once_with(report, interactive=not ci)
+
+
 @pytest.fixture(scope="module")
 def app():
     return QApplication.instance() or QApplication([])

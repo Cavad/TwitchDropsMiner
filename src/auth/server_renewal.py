@@ -74,6 +74,7 @@ class OwnedChromium:
         "[os.close(fd) for fd in {*fds,*high}-{3,4}]\n"
         "os.execvp(sys.argv[3],sys.argv[3:])\n"
     )
+    PROFILE_CLEANUP_DELAYS = (0, .25, .5, 1, 2, 2, 2)
 
     def __init__(self, executable: str, *, no_sandbox: bool = False, startup_timeout: float = 20,
                  background: bool = False):
@@ -136,6 +137,32 @@ class OwnedChromium:
     async def wait_pipe(self, pipe: DevToolsPipe) -> None:
         await pipe.browser.command("Browser.getVersion", timeout=self.startup_timeout)
 
+    @classmethod
+    async def cleanup_profile(cls, directory: tempfile.TemporaryDirectory) -> None:
+        # Chromium/antivirus handles can briefly outlive the owned leader on
+        # Windows. Retain TemporaryDirectory's symlink/readonly handling and keep
+        # potentially large deletions off the event loop.
+        for delay in cls.PROFILE_CLEANUP_DELAYS:
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                await asyncio.to_thread(directory.cleanup)
+                return
+            except OSError:
+                continue
+        raise SessionError("BROWSER_STOP") from None
+
+    @asynccontextmanager
+    async def profile(self) -> AsyncIterator[Path]:
+        from src.auth.windows_browser import OwnedBrowserWindows
+
+        directory = tempfile.TemporaryDirectory(prefix="tdm-renew-")
+        try:
+            yield Path(directory.name)
+        finally:
+            cleanup = asyncio.create_task(self.cleanup_profile(directory))
+            await OwnedBrowserWindows.drain(cleanup)
+
     @asynccontextmanager
     async def process(self, args: list[str], profile: Path, **options: Any) -> AsyncIterator[asyncio.subprocess.Process]:
         process = None
@@ -172,8 +199,7 @@ class OwnedChromium:
 
     @asynccontextmanager
     async def start(self) -> AsyncIterator[BrowserTargets]:
-        with tempfile.TemporaryDirectory(prefix="tdm-renew-") as directory:
-            profile = Path(directory)
+        async with self.profile() as profile:
             args = [
                 self.executable, f"--user-data-dir={profile}",
                 # pass_fds is POSIX-only; Windows keeps the owned loopback port.

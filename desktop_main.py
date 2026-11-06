@@ -15,10 +15,10 @@ def main() -> int:
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115 - process-lifetime stream
 
-    if len(sys.argv) == 3 and sys.argv[1] == "--verify-build":
+    if (len(sys.argv) == 3 or len(sys.argv) == 4 and sys.argv[3] == "--ci") and sys.argv[1] == "--verify-build":
         from desktop.verify import run
 
-        return run(sys.argv[2])
+        return run(sys.argv[2], interactive=len(sys.argv) == 3)
 
     from PySide6.QtCore import QLockFile, QTimer
     from PySide6.QtWidgets import QApplication, QMessageBox

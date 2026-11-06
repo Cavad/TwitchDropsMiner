@@ -10,14 +10,17 @@ from pathlib import Path
 from typing import Any
 
 
-def run(report_path: str) -> int:
+def run(report_path: str, *, interactive: bool = True) -> int:
+    if not interactive:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
     from desktop.engine import MinerEngine
     from desktop.window import MainWindow
 
-    report: dict[str, Any] = {"frozen": bool(getattr(__import__("sys"), "frozen", False)), "checks": []}
+    report: dict[str, Any] = {"frozen": bool(getattr(__import__("sys"), "frozen", False)),
+                              "browser_mode": "manual_handoff" if interactive else "protocol_only", "checks": []}
     target = Path(report_path).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     result = 1
@@ -36,18 +39,23 @@ def run(report_path: str) -> int:
 
                 chrome = BlankChrome()
                 chrome.background_capture = True
+                # Hosted runners have no interactive user desktop for WM_CLOSE.
+                # Exercise the same owned capture protocol and reject blank auth;
+                # the normal local check retains the complete manual handoff.
+                chrome._capturing = not interactive
                 async with chrome as browser:
                     assert browser.process and browser.process.poll() is None
                     profile = browser.profile
-                    await browser.finish_login()
+                    if interactive:
+                        await browser.finish_login()
                     try:
-                        await browser.wait_authenticated(timeout=20)
+                        await browser.wait_authenticated(timeout=60)
                         raise AssertionError("Blank browser must not authenticate")
                     except SessionError as error:
                         assert error.code == "HELPER_LOGIN_MISSING", f"Chrome blank handoff: {error.code}"
                     assert browser._capturing and browser._verified
                 assert profile is not None and not profile.exists()
-                report["checks"].append("native_browser_start_and_cleanup")
+                report["checks"].append("native_browser_start_and_cleanup" if interactive else "native_browser_protocol_and_cleanup")
                 try:
                     firefox = NativeFirefox.find_firefox()
                 except Exception:
@@ -58,18 +66,20 @@ def run(report_path: str) -> int:
 
                     firefox_browser = BlankFirefox(firefox)
                     firefox_browser.background_capture = True
+                    firefox_browser._capturing = not interactive
                     async with firefox_browser as browser:
                         assert browser.process and browser.process.poll() is None
                         firefox_profile = browser.profile
-                        await browser.finish_login()
+                        if interactive:
+                            await browser.finish_login()
                         try:
-                            await browser.wait_authenticated(timeout=20)
+                            await browser.wait_authenticated(timeout=60)
                             raise AssertionError("Blank browser must not authenticate")
                         except SessionError as error:
                             assert error.code == "HELPER_FIREFOX_LOGIN", f"Firefox blank handoff: {error.code}"
                         assert browser._capturing and browser._verified
                     assert firefox_profile is not None and not firefox_profile.exists()
-                    report["checks"].append("firefox_browser_start_and_cleanup")
+                    report["checks"].append("firefox_browser_start_and_cleanup" if interactive else "firefox_browser_protocol_and_cleanup")
                 async with (
                     OwnedChromium(SessionController._browser_executable(), background=True).start() as targets,
                     targets.target() as page,

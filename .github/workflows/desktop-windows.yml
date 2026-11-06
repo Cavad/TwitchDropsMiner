@@ -86,7 +86,7 @@ jobs:
       - name: Test native UI, session recovery and Windows browser ownership
         run: |
           . ./env/Scripts/Activate.ps1
-          python -m pytest tests/test_desktop.py tests/test_desktop_features.py tests/test_windows_browser.py tests/test_session_controller.py tests/test_helper_diagnostics.py tests/test_priority_fallback.py tests/test_reward_priority.py tests/test_wanted_queue_order.py -q --junitxml=desktop-tests.xml
+          python -m pytest tests/test_desktop.py tests/test_desktop_features.py tests/test_windows_browser.py tests/test_session_controller.py tests/test_server_renewal.py tests/test_renewal_profile_cleanup.py tests/test_helper_diagnostics.py tests/test_priority_fallback.py tests/test_reward_priority.py tests/test_wanted_queue_order.py -q --junitxml=desktop-tests.xml
           if ($LASTEXITCODE -ne 0) { throw 'Native desktop tests failed' }
       - name: Build portable desktop EXE
         run: |
@@ -109,7 +109,7 @@ jobs:
             $env:PYTHONPATH = ''
             $env:PYTHONHOME = ''
             Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
-            $process = Start-Process -FilePath $exe -ArgumentList @('--verify-build', ('"' + $report + '"')) -WorkingDirectory $temporary -WindowStyle Hidden -Wait -PassThru
+            $process = Start-Process -FilePath $exe -ArgumentList @('--verify-build', ('"' + $report + '"'), '--ci') -WorkingDirectory $temporary -WindowStyle Hidden -Wait -PassThru
             if ($process.ExitCode -ne 0) { throw "Packaged smoke check failed: $($process.ExitCode)" }
           } finally {
             $env:PATH = $previousPath
@@ -121,7 +121,7 @@ jobs:
             }
           }
           $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
-          if (-not $result.success -or -not $result.frozen) { throw 'Smoke check did not verify the frozen executable' }
+          if (-not $result.success -or -not $result.frozen -or $result.browser_mode -ne 'protocol_only') { throw 'Smoke check did not verify the frozen executable' }
       - name: Package EXE, guide, license and build provenance
         run: |
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null

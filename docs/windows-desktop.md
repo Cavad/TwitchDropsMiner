@@ -71,9 +71,16 @@ Settings, history and session files remain under
 `%LOCALAPPDATA%\TwitchDropsMinerDesktop\data`. Desktop preferences live in the parent
 folder; logs live in its `logs` folder. Keep session files private.
 
-The packaged smoke check uses temporary data and blank browser profiles. It checks
-browser handoff, cleanup, native tray hide/restore, local settings, engine startup
-and shutdown. It does not authenticate to Twitch or verify live drop accrual.
+The packaged smoke check uses temporary data and blank browser profiles. The local
+interactive check covers browser handoff and native tray hide/restore. On hosted
+GitHub runners, which have no interactive user desktop, `--verify-build report.json
+--ci` checks owned blank-browser protocols and cleanup without trying to close a
+manual sign-in window. Both modes check local settings, engine startup and shutdown.
+The report identifies the browser mode. Neither mode authenticates to Twitch or
+verifies live drop accrual. Native unit tests also cover Finish sign-in ownership.
+Additional local blank-profile Firefox manual-handoff checks have encountered
+browser-start and timeout failures. A passing hosted protocol check does not
+establish that this interactive path is reliable on every Windows computer.
 The executable is not code signed.
 
 ## Build on GitHub
