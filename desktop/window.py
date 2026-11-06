@@ -319,7 +319,7 @@ class MainWindow(QMainWindow):
         layout.addSpacing(16)
         self.engine_indicator = label("●  Starting engine", "muted")
         layout.addWidget(self.engine_indicator)
-        layout.addWidget(label("v2.5.0  /  Desktop r4", "muted"))
+        layout.addWidget(label("v2.5.0  /  Desktop r5", "muted"))
         return side
 
     def navigate(self, index):
@@ -529,7 +529,9 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "campaign_layout"):
             return
         campaigns = [c for c in self.data.get("campaigns", []) if campaign_matches(c, self.campaign_search.text(), self.campaign_filter.currentText())]
-        signature = json.dumps(campaigns, sort_keys=True)
+        # The add action depends on the saved Mining list and save state, not only campaign data.
+        selected = sorted({name.casefold() for name in self.data.get("settings", {}).get("games_to_watch", [])})
+        signature = json.dumps([campaigns, selected, self.settings_saving], sort_keys=True)
         if self.campaign_signature == signature:
             return
         self.campaign_signature = signature
@@ -562,7 +564,6 @@ class MainWindow(QMainWindow):
                 progress.setValue(100 if drop.get("is_claimed") else progress_percent(drop))
                 inner.addWidget(progress)
             game = campaign.get("game_name", "")
-            selected = {name.casefold() for name in self.data.get("settings", {}).get("games_to_watch", [])}
             if game.casefold() not in selected:
                 add = button("Add to mining list  +", lambda checked=False, name=game: self._add_campaign_game(name), "link")
                 add.setEnabled(not self.settings_saving)
@@ -898,6 +899,7 @@ class MainWindow(QMainWindow):
         self.saving_revision = self.settings_revision
         self.save_button.setEnabled(False)
         self.save_status.setText("Saving…")
+        self._render_campaigns()
         self.engine.submit("settings", {
             "games_to_watch": self._game_names(),
             "priority_list_only": self.strict_games.isChecked(),
@@ -1010,6 +1012,7 @@ class MainWindow(QMainWindow):
                 self.settings_dirty = True
                 self.save_status.setText("Save failed. Your edits are still here. Try again.")
             self.save_button.setEnabled(self.settings_dirty and self.engine_ready)
+            self._render_campaigns()
         if not success:
             if name == "login":
                 self._login_finished(False, message)

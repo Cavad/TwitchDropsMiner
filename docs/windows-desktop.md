@@ -1,7 +1,7 @@
 # Windows desktop edition
 
 This Windows fork packages the miner and a native desktop interface into
-`Twitch Drops Miner.exe` (desktop r4). Download the ZIP from this fork's
+`Twitch Drops Miner.exe` (desktop r5). Download the ZIP from this fork's
 [Releases](https://github.com/Cavad/TwitchDropsMiner/releases), extract it and run the
 executable from a permanent, writable folder.
 Close any older miner instance first. Python and Docker are not needed to run it.

@@ -125,7 +125,7 @@ jobs:
       - name: Package EXE, guide, license and build provenance
         run: |
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          @("Repository: $env:GITHUB_REPOSITORY", "Commit: $env:GITHUB_SHA", "Run: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", 'Python: 3.12; Windows x64; desktop r4', 'This smoke check does not authenticate to Twitch or verify live reward accrual.') | Set-Content dist/BUILD-INFO.txt -Encoding utf8
+          @("Repository: $env:GITHUB_REPOSITORY", "Commit: $env:GITHUB_SHA", "Run: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", 'Python: 3.12; Windows x64; desktop r5', 'This smoke check does not authenticate to Twitch or verify live reward accrual.') | Set-Content dist/BUILD-INFO.txt -Encoding utf8
           Compress-Archive -LiteralPath 'dist/Twitch Drops Miner.exe', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'docs/windows-desktop.md', 'dist/build-verification.json', 'dist/BUILD-INFO.txt' -DestinationPath release-assets/Twitch-Drops-Miner-Desktop-Windows-x64.zip
           $hash = (Get-FileHash -LiteralPath release-assets/Twitch-Drops-Miner-Desktop-Windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  Twitch-Drops-Miner-Desktop-Windows-x64.zip" | Set-Content release-assets/SHA256SUMS -Encoding ascii

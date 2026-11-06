@@ -15,8 +15,8 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEvent, QObject, Signal
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from desktop.engine import MinerEngine
 from desktop.model import campaign_matches, desktop_home, normalize_games, progress_percent
@@ -200,6 +200,33 @@ def test_campaign_text_is_plain_and_addition_preserves_draft_settings(window):
     assert not engine.commands
     widget._add_campaign_game("CAMPAIGN GAME")
     assert widget.games_list.count() == 3
+
+
+def add_buttons(widget):
+    # Rebuilt cards are released with deleteLater(); flush them before inspecting.
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return [button for button in widget.findChildren(QPushButton)
+            if button.text().startswith("Add to mining list")]
+
+
+def test_campaign_add_action_follows_saved_mining_list(window):
+    widget, engine = window
+    data = snapshot()
+    data["campaigns"] = [{"game_name": "Second game", "name": "November", "drops": [], "active": True}]
+    engine.snapshot.emit(data)
+    assert len(add_buttons(widget)) == 1
+    widget._add_campaign_game("Second game")
+    widget.save_button.click()
+    assert all(not button.isEnabled() for button in add_buttons(widget))
+    saved = copy.deepcopy(data)
+    saved["settings"]["games_to_watch"] = ["First game", "SECOND GAME"]
+    engine.snapshot.emit(saved)
+    engine.command_finished.emit("settings", True, "")
+    # Campaign data is unchanged; the saved list alone must remove the stale action.
+    assert add_buttons(widget) == []
+    engine.snapshot.emit(data)
+    assert len(add_buttons(widget)) == 1
+    assert add_buttons(widget)[0].isEnabled()
 
 
 def test_export_uses_entire_backend_content_and_reports_unwritable_path(window, tmp_path):
