@@ -675,3 +675,39 @@ def test_real_finish_failure_can_be_retried(window):
     widget._command_finished("finish_login", False, "Browser did not close")
     assert widget.finish_login.isEnabled()
     assert widget.banner_text.text() == "Browser did not close"
+
+
+def test_recap_date_selection_survives_updates_and_clears_on_logout(window):
+    widget, _ = window
+    current = {"start": "2026-11-08T22:00:00+00:00", "end": "2026-11-09T08:00:00+00:00",
+               "watch_minutes": 10, "claimed": 0, "waiting_ms": 0, "observed": True, "expired": []}
+    old = {**current, "start": "2026-11-07T22:00:00+00:00", "end": "2026-11-08T08:00:00+00:00",
+           "watch_minutes": 25}
+    widget._render_recap({**current, "history": [old]})
+    widget.recap_night.setCurrentIndex(1)
+    widget._render_recap({**current, "watch_minutes": 15, "history": [old]})
+    assert "25 confirmed watch min" in widget.recap_summary.text()
+    widget._render_recap({})
+    assert widget.recap_night.count() == 0
+
+
+def test_campaign_troubleshooting_requests_the_clicked_campaign(window):
+    widget, engine = window
+    data = snapshot()
+    data["campaigns"] = [{"id": "specific", "name": "Campaign", "game_name": "Game"}]
+    engine.snapshot.emit(data)
+    action = next(item for item in widget.findChildren(QPushButton) if item.text() == "Why am I not earning this?")
+    action.click()
+    assert engine.commands[-1] == ("campaign_help", "specific")
+
+
+def test_campaign_troubleshooting_shows_first_blocker_immediately(window):
+    from PySide6.QtWidgets import QMessageBox
+
+    widget, engine = window
+    engine.command_finished.emit("campaign_help", True, "<Campaign>\n\nFirst reward: Link your account.\n\nSecond reward: Claim the prerequisite.")
+    dialog = widget.findChild(QMessageBox)
+    assert dialog.text() == "<Campaign>"
+    assert dialog.informativeText() == "First reward: Link your account."
+    assert "Second reward" in dialog.detailedText()
+    dialog.close()

@@ -320,7 +320,7 @@ class MainWindow(QMainWindow):
         layout.addSpacing(16)
         self.engine_indicator = label("●  Starting engine", "muted")
         layout.addWidget(self.engine_indicator)
-        layout.addWidget(label("v2.5.0  /  Desktop r8", "muted"))
+        layout.addWidget(label("v2.5.0  /  Desktop r9", "muted"))
         return side
 
     def navigate(self, index):
@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
 
     def _copy_connection_diagnostics(self):
         if self.visible_diagnostic is not None:
-            data = {"desktop": "2.5.0 r8", **self.visible_diagnostic.to_dict()}
+            data = {"desktop": "2.5.0 r9", **self.visible_diagnostic.to_dict()}
             QGuiApplication.clipboard().setText(json.dumps(data, indent=2))
             self.show_notice("Copied connection diagnostics.")
 
@@ -631,6 +631,12 @@ class MainWindow(QMainWindow):
                 add = button("Add to mining list  +", lambda checked=False, name=game: self._add_campaign_game(name), "link")
                 add.setEnabled(not self.settings_saving)
                 inner.addWidget(add)
+            if campaign.get("id"):
+                inner.addWidget(button(
+                    "Why am I not earning this?",
+                    lambda checked=False, key=campaign["id"]: self.engine.submit("campaign_help", key),
+                    "link",
+                ))
             self.campaign_layout.addWidget(frame)
         self.campaign_layout.addStretch()
 
@@ -668,6 +674,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(label("Live activity from the engine. Keep this PC awake while collecting.", "muted"))
         recap, recap_layout = card()
         recap_layout.addWidget(label("Overnight recap", "section"))
+        self.recap_night = QComboBox()
+        self.recap_night.setAccessibleName("Overnight recap date")
+        self.recap_night.currentIndexChanged.connect(self._show_recap_night)
+        self.recap_nights = {}
+        recap_layout.addWidget(self.recap_night)
         self.recap_summary = label("", "muted", True)
         recap_layout.addWidget(self.recap_summary)
         self.recap_expired = QPlainTextEdit()
@@ -686,6 +697,23 @@ class MainWindow(QMainWindow):
         return page
 
     def _render_recap(self, recap):
+        current = self.recap_night.currentData()
+        nights = {report["start"]: report for report in (recap, *recap.get("history", [])) if report}
+        if tuple(nights) != tuple(self.recap_nights):
+            self.recap_night.blockSignals(True)
+            self.recap_night.clear()
+            for key in nights:
+                start = datetime.fromisoformat(key).astimezone()
+                self.recap_night.addItem(f"Night of {start:%d %b %Y}", key)
+            index = self.recap_night.findData(current) if current is not None else -1
+            self.recap_night.setCurrentIndex(max(0, index))
+            self.recap_night.blockSignals(False)
+        self.recap_nights = nights
+        self.recap_night.setVisible(len(nights) > 1)
+        self._show_recap_night()
+
+    def _show_recap_night(self):
+        recap = self.recap_nights.get(self.recap_night.currentData())
         if not recap:
             self.recap_summary.setText("Connect Twitch to see activity from 22:00 to 08:00 local time.")
             self.recap_expired.clear()
@@ -1097,6 +1125,20 @@ class MainWindow(QMainWindow):
         self.show_notice(message, persistent=not success)
 
     def _command_finished(self, name, success, message):
+        if name == "campaign_help" and success:
+            dialog = QMessageBox(self)
+            dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            dialog.setWindowTitle("Campaign troubleshooting")
+            dialog.setTextFormat(Qt.TextFormat.PlainText)
+            summary, _, details = message.partition("\n\n")
+            dialog.setText(summary)
+            if details:
+                first, _, remaining = details.partition("\n\n")
+                dialog.setInformativeText(first)
+                if remaining:
+                    dialog.setDetailedText(details)
+            dialog.open()
+            return
         if name == "settings":
             self.settings_saving = False
             if success and self.settings_revision == self.saving_revision:

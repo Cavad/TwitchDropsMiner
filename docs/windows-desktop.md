@@ -1,7 +1,7 @@
 # Windows desktop edition
 
 This Windows fork packages the miner and a native desktop interface into
-`Twitch Drops Miner.exe` (desktop r8). Download the ZIP from this fork's
+`Twitch Drops Miner.exe` (desktop r9). Download the ZIP from this fork's
 [Releases](https://github.com/Cavad/TwitchDropsMiner/releases), extract it and run the
 executable from a permanent, writable folder.
 Close any older miner instance first. Python and Docker are not needed to run it.
@@ -125,3 +125,14 @@ unfinished rewards in the queue. Parallel reward progress is not added together.
 Time when the app was closed, asleep or disconnected does not count as waiting.
 Activity is saved locally per Twitch account and is collected from this desktop
 version onward.
+
+Use the date selector in **Activity** to revisit recorded nights from the last
+seven local overnight windows, including the current or most recent night.
+Existing r8 recap data is included if it falls within that period.
+
+## Campaign troubleshooting
+
+In **Campaigns**, select **Why am I not earning this?** for a reward-by-reward
+check of the watch window, account link, prerequisites, mining rules, and
+eligible streams currently tracked by the miner. A tracked eligible stream is
+an opportunity to earn progress. Check **Now Mining** for the current reward.

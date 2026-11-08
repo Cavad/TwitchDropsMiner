@@ -27,12 +27,14 @@ class OvernightRecap:
     SAMPLE_GAP = 8
     SAVE_INTERVAL = 60
     MAX_CAMPAIGNS = 200
+    HISTORY_NIGHTS = 7
 
     def __init__(self, root=None):
         self.root = root or desktop_home()
         self.account = None
         self.path = None
         self.report = {}
+        self.archive = {}
         self.previous = None
         self.watched = {}
         self.previous_drop = None
@@ -54,6 +56,7 @@ class OvernightRecap:
         self.account = account
         self.path = self.root / f"overnight-recap-{account}.json" if account is not None else None
         self.report = {}
+        self.archive = {}
         self.previous = None
         self.watched.clear()
         self.previous_drop = None
@@ -63,19 +66,52 @@ class OvernightRecap:
         if self.path is None:
             return
         try:
-            if self.path.stat().st_size > 256_000:
+            if self.path.stat().st_size > 8_000_000:
                 return
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if (isinstance(raw, dict) and isinstance(raw.get("start"), str)
-                    and all(type(raw.get(key)) is int and raw[key] >= 0
-                            for key in ("watch_minutes", "claimed", "waiting_ms"))
-                    and type(raw.get("observed")) is bool
-                    and isinstance(raw.get("expired"), dict)
-                    and len(raw["expired"]) <= self.MAX_CAMPAIGNS
-                    and all(isinstance(name, str) for name in raw["expired"].values())):
-                self.report = {key: raw[key] for key in ("start", "watch_minutes", "claimed", "waiting_ms", "expired", "observed")}
+            if not isinstance(raw, dict):
+                return
+            self.report = self._load_report(raw)
+            records = raw.get("history")
+            if isinstance(records, list):
+                for entry in records[:self.HISTORY_NIGHTS]:
+                    report = self._load_report(entry)
+                    if report and report["observed"]:
+                        self.archive[report["start"]] = report
         except (OSError, ValueError, RecursionError):
             pass
+
+    def _load_report(self, raw):
+        if (not isinstance(raw, dict)
+                or not all(type(raw.get(key)) is int and raw[key] >= 0
+                           for key in ("watch_minutes", "claimed", "waiting_ms"))
+                or type(raw.get("observed")) is not bool
+                or not isinstance(raw.get("expired"), dict)
+                or len(raw["expired"]) > self.MAX_CAMPAIGNS
+                or not all(isinstance(name, str) and len(name) <= 256 for name in raw["expired"].values())):
+            return {}
+        try:
+            start = datetime.fromisoformat(raw["start"])
+            if start.tzinfo is None:
+                return {}
+            # r8 stored only the start. Derive its local closing time on upgrade.
+            if "end" in raw:
+                end = datetime.fromisoformat(raw["end"])
+            else:
+                local_start, local_end = self.window(start + timedelta(seconds=1))
+                end = local_end if local_start == start else start + timedelta(hours=10)
+            if end.tzinfo is None or end <= start:
+                return {}
+            start_key = start.astimezone(timezone.utc).isoformat()
+            end_key = end.astimezone(timezone.utc).isoformat()
+        except (KeyError, ValueError, TypeError, OverflowError):
+            return {}
+        return {**{key: raw[key] for key in ("watch_minutes", "claimed", "waiting_ms", "expired", "observed")},
+                "start": start_key, "end": end_key}
+
+    @staticmethod
+    def _display_report(report):
+        return {**report, "expired": sorted(report["expired"].values())}
 
     def sample(self, client, *, account, state, progress, queue, history, ready, now=None, tick=None):
         account = account if type(account) is int and account > 0 else None
@@ -90,9 +126,24 @@ class OvernightRecap:
         key = start.isoformat()
         previous = self.previous
         self.previous = (now, tick, state)
+        # A clock or timezone change must not replace a more recent saved night.
+        if key < self.report.get("start", key):
+            self.previous = None
+            self.previous_drop = None
+            self.campaigns.clear()
+            return self._snapshot()
         if self.report.get("start") != key:
-            self.flush()
-            self.report = {"start": key, "watch_minutes": 0, "claimed": 0, "waiting_ms": 0, "expired": {}, "observed": False}
+            if self.report.get("observed"):
+                self.archive[self.report["start"]] = self.report
+                self.dirty = True
+            self.report = self.archive.pop(key, None) or {
+                "start": key, "end": end.isoformat(), "watch_minutes": 0, "claimed": 0,
+                "waiting_ms": 0, "expired": {}, "observed": False,
+            }
+            oldest_night = start.astimezone().date() - timedelta(days=self.HISTORY_NIGHTS - 1)
+            oldest = datetime.combine(oldest_night, time(22)).astimezone(timezone.utc).isoformat()
+            self.archive = {stamp: self.archive[stamp] for stamp in sorted(self.archive, reverse=True)
+                            if oldest <= stamp < key}
             self.watched.clear()
             self.previous_drop = None
             self.campaigns.clear()
@@ -148,7 +199,11 @@ class OvernightRecap:
             self.dirty = True
         if self.dirty and tick - self.last_save >= self.SAVE_INTERVAL:
             self.flush()
-        return {**self.report, "end": end.isoformat(), "expired": sorted(self.report["expired"].values())}
+        return self._snapshot()
+
+    def _snapshot(self):
+        return {**self._display_report(self.report),
+                "history": [self._display_report(report) for report in self.archive.values()]}
 
     def _sample_watch(self, client, progress, continuous):
         if continuous and self.previous_drop is not None:
@@ -190,7 +245,7 @@ class OvernightRecap:
         temporary = self.path.with_suffix(".tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(json.dumps(self.report), encoding="utf-8")
+            temporary.write_text(json.dumps({**self.report, "history": list(self.archive.values())}), encoding="utf-8")
             os.replace(temporary, self.path)
         except OSError:
             logger.warning("Could not save the overnight recap")

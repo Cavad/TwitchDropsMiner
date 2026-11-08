@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from PySide6.QtCore import QThread, Signal
 
+from desktop.campaign_help import explain_campaign
 from desktop.mining_health import MiningHealth
 from desktop.planning import MiningPlanner
 from desktop.preferences import DesktopPreferences
@@ -265,6 +266,9 @@ class MinerEngine(QThread):
                 # Qt's queued Finish click reaches the engine.
                 if browser is not None:
                     await browser.finish_login()
+            elif name == "campaign_help":
+                self.command_finished.emit(name, True, explain_campaign(self.client, payload))
+                return
             elif name == "settings":
                 self.client.gui.settings.update_settings(payload)
                 self.notice.emit("Settings saved.")

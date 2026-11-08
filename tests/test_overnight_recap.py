@@ -110,3 +110,54 @@ def test_short_refresh_crossing_deadline_keeps_campaign_observation(setup):
     observe(recap, client, start, 9, ready=False, state="refreshing")
     observe(recap, client, start, 11, ready=False, state="refreshing")
     assert observe(recap, client, start, 13)["expired"] == ["Campaign"]
+
+
+def test_history_rolls_over_at_seven_nights_and_survives_restart(setup, tmp_path):
+    start, client, _, recap = setup
+    for day in range(9):
+        night = datetime(2026, 11, 7 + day, 22).astimezone(timezone.utc)
+        report = observe(recap, client, night, 0)
+    assert len(report["history"]) == 6
+    assert all(night["observed"] for night in report["history"])
+    recap.flush()
+    restarted = OvernightRecap(tmp_path)
+    assert observe(restarted, client, night, 1)["history"] == report["history"]
+    assert observe(restarted, client, night, 2, account=2)["history"] == []
+
+
+def test_loads_r8_recap_into_history_and_skips_empty_nights(setup, tmp_path):
+    import json
+
+    start, client, _, recap = setup
+    old = {"start": start.isoformat(), "watch_minutes": 11, "claimed": 2,
+           "waiting_ms": 3, "expired": {"test": "Campaign"}, "observed": True}
+    (tmp_path / "overnight-recap-1.json").write_text(json.dumps(old), encoding="utf-8")
+    later = datetime(2026, 11, 9, 22).astimezone(timezone.utc)
+    report = observe(recap, client, later, 0)
+    assert len(report["history"]) == 1
+    assert report["history"][0]["watch_minutes"] == 11
+    assert report["history"][0]["expired"] == ["Campaign"]
+
+
+def test_clock_rollback_to_previous_night_preserves_latest_recap(setup):
+    start, client, drop, recap = setup
+    observe(recap, client, start, 0)
+    drop.real_current_minutes += 1
+    observe(recap, client, start, 2)
+    previous = datetime(2026, 11, 6, 22).astimezone(timezone.utc)
+    report = observe(recap, client, previous, 0)
+    assert report["start"] == start.isoformat()
+    assert report["watch_minutes"] == 1
+
+
+def test_invalid_timestamp_isolated_to_its_history_record(setup, tmp_path):
+    import json
+
+    start, client, _, recap = setup
+    valid = {"start": start.isoformat(), "end": (start + timedelta(hours=10)).isoformat(),
+             "watch_minutes": 12, "claimed": 0, "waiting_ms": 0, "expired": {}, "observed": True}
+    bad = {**valid, "start": "0001-01-01T00:00:00+23:59"}
+    (tmp_path / "overnight-recap-1.json").write_text(json.dumps({**valid, "history": [bad]}), encoding="utf-8")
+    report = observe(recap, client, start, 0)
+    assert report["watch_minutes"] == 12
+    assert report["history"] == []
