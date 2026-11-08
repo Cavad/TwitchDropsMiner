@@ -1,7 +1,7 @@
 # Windows desktop edition
 
 This Windows fork packages the miner and a native desktop interface into
-`Twitch Drops Miner.exe` (desktop r6). Download the ZIP from this fork's
+`Twitch Drops Miner.exe` (desktop r7). Download the ZIP from this fork's
 [Releases](https://github.com/Cavad/TwitchDropsMiner/releases), extract it and run the
 executable from a permanent, writable folder.
 Close any older miner instance first. Python and Docker are not needed to run it.
@@ -114,3 +114,14 @@ When the miner is idle, the overview distinguishes campaign loading, an empty
 strict Mining list, missing account links, and a lack of eligible live streams.
 If Twitch session verification fails, **Copy diagnostics** copies fixed error
 codes and status fields without copying session files, usernames, or raw logs.
+
+## Overnight recap
+
+Open **Activity** to see the current or most recent overnight window, from
+22:00 to 08:00 in the PC's local time. The recap shows observed increases in
+Twitch-confirmed minutes for the current reward, claims recorded by this miner,
+time waiting for eligible live streams, and campaigns observed expiring with
+unfinished rewards in the queue. Parallel reward progress is not added together.
+Time when the app was closed, asleep or disconnected does not count as waiting.
+Activity is saved locally per Twitch account and is collected from this desktop
+version onward.

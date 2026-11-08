@@ -15,6 +15,7 @@ from PySide6.QtCore import QThread, Signal
 from desktop.mining_health import MiningHealth
 from desktop.planning import MiningPlanner
 from desktop.preferences import DesktopPreferences
+from desktop.recap import OvernightRecap
 
 
 class MinerEngine(QThread):
@@ -42,6 +43,7 @@ class MinerEngine(QThread):
         self.connection: dict[str, Any] = {"phase": "starting", "message": "Starting the local miner…", "code": ""}
         self.recovering = False
         self.mining_health = MiningHealth()
+        self.overnight_recap = OvernightRecap()
         self.connection_error = None
 
     def _set_connection(self, phase, message, diagnostic=None, attempt=0):
@@ -153,6 +155,7 @@ class MinerEngine(QThread):
             try:
                 await self.client.shutdown()
             finally:
+                self.overnight_recap.flush()
                 settings.save()
                 listener.close()
 
@@ -183,6 +186,13 @@ class MinerEngine(QThread):
             self.client, logged_in=logged_in, ready=not busy and self.connection["phase"] == "ready",
             progress=progress, queue=queue,
         )
+        progress = gui.progress.get_current_drop()
+        history = self.client.drop_history.get_entries(limit=500)
+        recap = self.overnight_recap.sample(
+            self.client, account=getattr(self.client._auth_state, "user_id", None) if logged_in else None,
+            state=mining_health.get("state"), progress=progress, queue=queue, history=history,
+            ready=not busy and self.connection["phase"] == "ready",
+        )
         return copy.deepcopy({
             "status": gui.status.get(),
             "login": gui.login.get_status(),
@@ -190,13 +200,14 @@ class MinerEngine(QThread):
             "connection": {**self.connection, "can_recover": can_recover},
             "logged_in": logged_in,
             "pause": self.client.pause_info(),
-            "progress": gui.progress.get_current_drop(),
+            "progress": progress,
+            "overnight_recap": recap,
             "mining_health": mining_health,
             "channels": gui.channels.get_channels(),
             "campaigns": gui.inv.get_campaigns(),
             "settings": gui.settings.get_settings(),
             "lines": gui.output.get_history()[-250:],
-            "history": self.client.drop_history.get_entries(limit=500),
+            "history": history,
             "total_claimed": self.client.drop_history.total_count,
             "queue": queue,
         })

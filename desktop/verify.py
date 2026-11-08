@@ -106,8 +106,18 @@ def run(report_path: str, *, interactive: bool = True) -> int:
             assert window.connection_progress.value() == 3
             window.navigate(5)
             assert window.pages.currentIndex() == 5
+            window.navigate(3)
+            window._render_recap({
+                "start": "2026-11-07T22:00:00+00:00", "end": "2026-11-08T08:00:00+00:00",
+                "watch_minutes": 7, "claimed": 1, "waiting_ms": 60_000, "observed": True,
+                "expired": ["Verification campaign"],
+            })
+            assert "7 confirmed watch min" in window.recap_summary.text()
+            assert window.recap_expired.toPlainText() == "Verification campaign"
+            window._render_recap({})
+            assert window.recap_expired.isHidden() and not window.recap_expired.toPlainText()
             window.navigate(0)
-            report["checks"].append("connection_progress_and_queue_navigation")
+            report["checks"].extend(("connection_progress_and_queue_navigation", "overnight_recap_display"))
             stage = {"settings_sent": False, "settings_saved": False, "snapshot": False}
             timed_out = []
 

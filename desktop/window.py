@@ -320,7 +320,7 @@ class MainWindow(QMainWindow):
         layout.addSpacing(16)
         self.engine_indicator = label("●  Starting engine", "muted")
         layout.addWidget(self.engine_indicator)
-        layout.addWidget(label("v2.5.0  /  Desktop r6", "muted"))
+        layout.addWidget(label("v2.5.0  /  Desktop r7", "muted"))
         return side
 
     def navigate(self, index):
@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
 
     def _copy_connection_diagnostics(self):
         if self.visible_diagnostic is not None:
-            data = {"desktop": "2.5.0 r6", **self.visible_diagnostic.to_dict()}
+            data = {"desktop": "2.5.0 r7", **self.visible_diagnostic.to_dict()}
             QGuiApplication.clipboard().setText(json.dumps(data, indent=2))
             self.show_notice("Copied connection diagnostics.")
 
@@ -666,6 +666,17 @@ class MainWindow(QMainWindow):
         layout.setSpacing(16)
         layout.addWidget(label("A window into your miner.", "title"))
         layout.addWidget(label("Live activity from the engine. Keep this PC awake while collecting.", "muted"))
+        recap, recap_layout = card()
+        recap_layout.addWidget(label("Overnight recap", "section"))
+        self.recap_summary = label("", "muted", True)
+        recap_layout.addWidget(self.recap_summary)
+        self.recap_expired = QPlainTextEdit()
+        self.recap_expired.setReadOnly(True)
+        self.recap_expired.setMaximumHeight(96)
+        self.recap_expired.setAccessibleName("Campaigns expired unfinished")
+        recap_layout.addWidget(self.recap_expired)
+        layout.addWidget(recap)
+        self._render_recap({})
         self.activity_text = QPlainTextEdit()
         self.activity_text.setReadOnly(True)
         self.activity_text.setFont(QFont("Cascadia Code", 10))
@@ -673,6 +684,28 @@ class MainWindow(QMainWindow):
         self.activity_text.setAccessibleName("Miner activity")
         layout.addWidget(self.activity_text, 1)
         return page
+
+    def _render_recap(self, recap):
+        if not recap:
+            self.recap_summary.setText("Connect Twitch to see activity from 22:00 to 08:00 local time.")
+            self.recap_expired.clear()
+            self.recap_expired.hide()
+            return
+        start = datetime.fromisoformat(recap["start"]).astimezone()
+        end = datetime.fromisoformat(recap["end"]).astimezone()
+        wait = MiningPlanner.duration(recap["waiting_ms"] // 60_000)
+        names = recap["expired"]
+        period = f"{start:%d %b %H:%M} to {end:%d %b %H:%M} local time"
+        if recap["observed"]:
+            summary = (f"{recap['watch_minutes']} confirmed watch min · {recap['claimed']} rewards claimed · "
+                       f"{wait} waiting for eligible streams · {len(names)} campaigns expired unfinished")
+        else:
+            summary = "No activity was recorded for this window."
+        self.recap_summary.setText(f"{period}\n{summary}")
+        expired = "\n".join(names)
+        if self.recap_expired.toPlainText() != expired:
+            self.recap_expired.setPlainText(expired)
+        self.recap_expired.setVisible(bool(names))
 
     def _settings(self):
         page = QWidget()
@@ -841,6 +874,7 @@ class MainWindow(QMainWindow):
         self.queue_detail.setText("\n".join(f"{i+1:02}   {game}" for i, game in enumerate(games[:3])) if games else "Set a priority list to focus\non the rewards you want.")
         self._render_campaigns()
         self._render_history(data.get("history", []))
+        self._render_recap(data.get("overnight_recap", {}))
         lines = "\n".join(data.get("lines", []))
         if lines != self.console_signature:
             self.console_signature = lines

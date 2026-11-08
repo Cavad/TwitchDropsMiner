@@ -609,3 +609,19 @@ def test_importing_desktop_ui_defers_miner_storage_paths():
         capture_output=True, text=True, check=False, timeout=15,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_activity_shows_overnight_recap_and_clears_private_campaigns_on_logout(window):
+    widget, _ = window
+    widget._render_recap({
+        "start": "2026-11-07T22:00:00+00:00", "end": "2026-11-08T08:00:00+00:00",
+        "watch_minutes": 31, "claimed": 2, "waiting_ms": 125_000, "observed": True,
+        "expired": ["<Campaign name>"],
+    })
+    assert "31 confirmed watch min" in widget.recap_summary.text()
+    assert "2 rewards claimed" in widget.recap_summary.text()
+    assert "2m waiting" in widget.recap_summary.text()
+    assert widget.recap_expired.toPlainText() == "<Campaign name>"
+    widget._render_recap({})
+    assert widget.recap_expired.isHidden()
+    assert widget.recap_expired.toPlainText() == ""
