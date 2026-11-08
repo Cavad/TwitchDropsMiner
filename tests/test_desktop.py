@@ -599,3 +599,13 @@ def test_late_finish_error_does_not_reopen_manual_login_controls(window):
     widget._command_finished("finish_login", False, "Previous window closed")
     assert widget.login_stage == "capturing"
     assert widget.finish_login.isHidden()
+
+
+
+def test_importing_desktop_ui_defers_miner_storage_paths():
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; import desktop.window; assert 'src.config.paths' not in sys.modules"],
+        capture_output=True, text=True, check=False, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr

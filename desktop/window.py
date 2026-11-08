@@ -50,7 +50,6 @@ from desktop.model import campaign_matches, desktop_home, progress_percent
 from desktop.planning import MiningPlanner
 from desktop.preferences import DesktopPreferences
 from desktop.system_tray import SystemTrayController
-from src.auth.session_diagnostics import SessionDiagnostic
 
 
 THEME = """
@@ -478,6 +477,8 @@ class MainWindow(QMainWindow):
         diagnostic = connection.get("diagnostic")
         self.visible_diagnostic = None
         if phase == "attention" and diagnostic:
+            from src.auth.session_diagnostics import SessionDiagnostic
+
             safe = SessionDiagnostic.from_dict(diagnostic)
             self.visible_diagnostic = safe
             text = f"{self._connection_guidance(safe, connection.get('can_recover', False))} ({safe.code} · {safe.stage} · {safe.reason})"
