@@ -320,7 +320,7 @@ class MainWindow(QMainWindow):
         layout.addSpacing(16)
         self.engine_indicator = label("●  Starting engine", "muted")
         layout.addWidget(self.engine_indicator)
-        layout.addWidget(label("v2.5.0  /  Desktop r7", "muted"))
+        layout.addWidget(label("v2.5.0  /  Desktop r8", "muted"))
         return side
 
     def navigate(self, index):
@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
 
     def _copy_connection_diagnostics(self):
         if self.visible_diagnostic is not None:
-            data = {"desktop": "2.5.0 r7", **self.visible_diagnostic.to_dict()}
+            data = {"desktop": "2.5.0 r8", **self.visible_diagnostic.to_dict()}
             QGuiApplication.clipboard().setText(json.dumps(data, indent=2))
             self.show_notice("Copied connection diagnostics.")
 
@@ -1037,7 +1037,8 @@ class MainWindow(QMainWindow):
         self.engine.submit("login", {"browser": self.login_browser.currentData()})
 
     def _finish_login(self):
-        if not self.login_busy or self.login_cancelling:
+        if (not self.login_busy or self.login_cancelling
+                or self.login_stage not in ("login", "chromium_login", "firefox_login")):
             return
         self.finish_login.setEnabled(False)
         self.login_stage = "finishing"
@@ -1090,7 +1091,7 @@ class MainWindow(QMainWindow):
         self.login_browser.setEnabled(True)
         self.cancel_login.hide()
         self.finish_login.hide()
-        self.connect_button.setEnabled(self.engine_ready)
+        self.connect_button.setEnabled(self.engine_ready and not success and not self.data.get("logged_in"))
         self.connect_button.setText("Twitch connected" if success else "Connect Twitch  →")
         self.login_hint.setText(message)
         self.show_notice(message, persistent=not success)
@@ -1114,8 +1115,11 @@ class MainWindow(QMainWindow):
         if not success:
             if name == "login":
                 self._login_finished(False, message)
-            elif (name == "finish_login" and self.login_busy and not self.login_cancelling
-                  and self.login_stage in ("login", "chromium_login", "firefox_login")):
+            elif name == "finish_login":
+                if (not self.login_busy or self.login_cancelling or self.data.get("logged_in")
+                        or self.login_stage not in ("finishing", "login", "chromium_login", "firefox_login")):
+                    return
+                self.login_stage = "login"
                 self.finish_login.setEnabled(True)
                 self.connect_button.setText("Waiting for Twitch…")
                 self.login_hint.setText(message)

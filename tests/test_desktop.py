@@ -598,6 +598,7 @@ def test_late_finish_error_does_not_reopen_manual_login_controls(window):
     widget._login_phase("capturing")
     widget._command_finished("finish_login", False, "Previous window closed")
     assert widget.login_stage == "capturing"
+    assert widget.banner.isHidden()
     assert widget.finish_login.isHidden()
 
 
@@ -625,3 +626,52 @@ def test_activity_shows_overnight_recap_and_clears_private_campaigns_on_logout(w
     widget._render_recap({})
     assert widget.recap_expired.isHidden()
     assert widget.recap_expired.toPlainText() == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("connected", "saved_ready"), [(True, False), (False, True), (False, False)])
+async def test_helper_admission_race_only_succeeds_if_session_is_ready(app, connected, saved_ready):
+    from src.auth.session_bundle import SessionError
+
+    engine = MinerEngine()
+    engine.client = SimpleNamespace(
+        enable_helper=AsyncMock(side_effect=SessionError("HELPER_STATE")),
+        cancel_helper=AsyncMock(),
+        _auth_state=SimpleNamespace(_logged_in=SimpleNamespace(is_set=lambda: connected)),
+        session_controller=SimpleNamespace(session=SimpleNamespace(
+            status=lambda: {"state": "ready" if saved_ready else "logged_out"},
+        )),
+    )
+    outcomes = []
+    engine.login_finished.connect(lambda success, message: outcomes.append((success, message)))
+    await engine._login()
+    if connected or saved_ready:
+        assert outcomes[0][0] is True
+        assert engine.connection_error is None
+        engine.client.cancel_helper.assert_not_awaited()
+    else:
+        assert outcomes[0][0] is False
+        assert "SESSION_HELPER_STATE" in outcomes[0][1]
+        engine.client.cancel_helper.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_late_finish_without_owned_browser_is_successful_noop(app):
+    engine = MinerEngine()
+    engine._snapshot = Mock(return_value={})
+    outcomes = []
+    engine.command_finished.connect(lambda *args: outcomes.append(args))
+    await engine._dispatch("finish_login", None)
+    assert outcomes == [("finish_login", True, "")]
+
+
+def test_real_finish_failure_can_be_retried(window):
+    widget, engine = window
+    widget.login_busy = True
+    widget._login_phase("chromium_login")
+    widget.finish_login.click()
+    widget.finish_login.click()
+    assert engine.commands.count(("finish_login", None)) == 1
+    widget._command_finished("finish_login", False, "Browser did not close")
+    assert widget.finish_login.isEnabled()
+    assert widget.banner_text.text() == "Browser did not close"

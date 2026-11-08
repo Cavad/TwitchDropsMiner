@@ -261,9 +261,10 @@ class MinerEngine(QThread):
                     await self.client.cancel_helper()
             elif name == "finish_login":
                 browser = self.active_login_browser
-                if browser is None:
-                    raise SessionError("HELPER_STATE")
-                await browser.finish_login()
+                # Closing the sign-in window manually can advance the helper before
+                # Qt's queued Finish click reaches the engine.
+                if browser is not None:
+                    await browser.finish_login()
             elif name == "settings":
                 self.client.gui.settings.update_settings(payload)
                 self.notice.emit("Settings saved.")
@@ -304,12 +305,14 @@ class MinerEngine(QThread):
         from src.auth.session_bundle import SessionError
 
         success = False
+        admitted = False
         self.connection_error = None
         self._set_connection("signing_in", "Opening the sign-in browser…")
         message = "Sign-in cancelled. You can reconnect whenever you are ready."
         try:
             async with asyncio.timeout(self.LOGIN_TIMEOUT_SECONDS):
                 await self.client.enable_helper(lambda: not self.stopping)
+                admitted = True
 
                 def create_browser():
                     browser = BrowserSelection.create(browser_choice)
@@ -334,12 +337,21 @@ class MinerEngine(QThread):
             self.connection_error = SessionDiagnostic(code="HELPER_LOGIN_TIMEOUT", stage="browser_login", reason="timeout")
             message = "Sign-in timed out. You can retry, or select Firefox if Twitch's code page keeps spinning."
         except SessionError as error:
-            self.connection_error = error.diagnostic
-            code, guidance = HelperDiagnostics.describe(error.code)
-            if error.code == "CATALOG" and error.diagnostic.reason == "integrity":
-                message = "Twitch rejected the session verification. The app could not connect; campaign data has not been loaded. Please retry later. (SESSION_CATALOG)"
+            if (not admitted and error.code == "HELPER_STATE"
+                    and (self.client._auth_state._logged_in.is_set()
+                         or self.client.session_controller.session.status()["state"] == "ready")):
+                # Restoring the saved session can win the race with a new login
+                # request. The validated session belongs to the existing flow.
+                success = True
+                message = "Twitch session restored. Checking your eligible campaigns…"
+                self._set_connection("loading", message)
             else:
-                message = f"{guidance} ({code})"
+                self.connection_error = error.diagnostic
+                code, guidance = HelperDiagnostics.describe(error.code)
+                if error.code == "CATALOG" and error.diagnostic.reason == "integrity":
+                    message = "Twitch rejected the session verification. The app could not connect; campaign data has not been loaded. Please retry later. (SESSION_CATALOG)"
+                else:
+                    message = f"{guidance} ({code})"
         except Exception:
             logging.getLogger("TwitchDrops.desktop").exception("Desktop login failed")
             self.connection_error = SessionError("HELPER_FAILED", stage="browser_login", reason="unexpected_exception").diagnostic
