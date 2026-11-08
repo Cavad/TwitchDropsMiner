@@ -143,3 +143,37 @@ async def test_desktop_verifier_uses_normal_browser_but_default_still_uses_headl
         if background:
             assert options["startupinfo"].wShowWindow == 0
             assert "--window-position=-32000,-32000" in args
+
+
+@pytest.mark.asyncio
+async def test_finish_during_capture_is_idempotent(monkeypatch):
+    from src.auth import login_helper
+
+    browser = login_helper.NativeChrome()
+    browser._capturing = True
+    monkeypatch.setattr(login_helper.sys, "platform", "win32")
+    await browser.finish_login()
+
+
+@pytest.mark.asyncio
+async def test_finish_drains_native_worker_when_cancelled(monkeypatch):
+    from src.auth import login_helper
+
+    browser = login_helper.NativeChrome()
+    browser.process = Mock(pid=123, poll=Mock(return_value=None))
+    started, release = threading.Event(), threading.Event()
+
+    def finish(_windows):
+        started.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(login_helper.sys, "platform", "win32")
+    monkeypatch.setattr(OwnedBrowserWindows, "finish", finish)
+    task = asyncio.create_task(browser.finish_login())
+    assert await asyncio.to_thread(started.wait, 2)
+    task.cancel()
+    await asyncio.sleep(.02)
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task

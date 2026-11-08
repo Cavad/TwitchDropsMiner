@@ -530,9 +530,9 @@ class NativeChrome:
         return self.process is not None and self.process.poll() is None and pid == self.process.pid
 
     async def finish_login(self) -> None:
-        if sys.platform != "win32" or self._capturing:
+        if sys.platform != "win32":
             raise SessionError("HELPER_STATE")
-        if self.process is None or self.process.poll() is not None:
+        if self._capturing or self.process is None or self.process.poll() is not None:
             return
         from src.auth.windows_browser import OwnedBrowserWindows
 
@@ -543,7 +543,11 @@ class NativeChrome:
         for _attempt in range(25):
             if self.process is None or self.process.poll() is not None or self._capturing:
                 return
-            await asyncio.to_thread(windows.finish)
+            action = asyncio.create_task(asyncio.to_thread(windows.finish))
+            try:
+                await asyncio.shield(action)
+            finally:
+                await OwnedBrowserWindows.drain(action)
             await asyncio.sleep(.2)
         raise SessionError("HELPER_BROWSER")
 

@@ -141,6 +141,10 @@ class WebGUIManager:
         """
         self._selected_channel_id = channel_id
 
+    def has_pending_channel_selection(self) -> bool:
+        """Check for an unprocessed channel selection without consuming it."""
+        return self._selected_channel_id is not None
+
     def get_selected_channel_id(self) -> int | None:
         """Get the currently selected channel ID and clear the selection.
 

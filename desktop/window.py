@@ -12,6 +12,7 @@ from PySide6.QtGui import (
     QColor,
     QDesktopServices,
     QFont,
+    QGuiApplication,
     QIcon,
     QLinearGradient,
     QPainter,
@@ -49,6 +50,7 @@ from desktop.model import campaign_matches, desktop_home, progress_percent
 from desktop.planning import MiningPlanner
 from desktop.preferences import DesktopPreferences
 from desktop.system_tray import SystemTrayController
+from src.auth.session_diagnostics import SessionDiagnostic
 
 
 THEME = """
@@ -319,7 +321,7 @@ class MainWindow(QMainWindow):
         layout.addSpacing(16)
         self.engine_indicator = label("●  Starting engine", "muted")
         layout.addWidget(self.engine_indicator)
-        layout.addWidget(label("v2.5.0  /  Desktop r5", "muted"))
+        layout.addWidget(label("v2.5.0  /  Desktop r6", "muted"))
         return side
 
     def navigate(self, index):
@@ -351,6 +353,9 @@ class MainWindow(QMainWindow):
         self.recover_button = button("Retry saved session", lambda: self.engine.submit("recover"), name="recoverSessionButton")
         self.recover_button.hide()
         connection_row.addWidget(self.recover_button)
+        self.copy_diagnostics = button("Copy diagnostics", self._copy_connection_diagnostics)
+        self.copy_diagnostics.hide()
+        connection_row.addWidget(self.copy_diagnostics)
         connection_layout.addLayout(connection_row)
         layout.addWidget(connection)
         hero, hero_layout = card("hero")
@@ -423,6 +428,8 @@ class MainWindow(QMainWindow):
         self.mining_progress.setAccessibleName("Current reward progress")
         mining_layout.addWidget(self.mining_title)
         mining_layout.addWidget(self.mining_detail)
+        self.mining_health = label("", "muted", True)
+        mining_layout.addWidget(self.mining_health)
         mining_layout.addStretch()
         mining_layout.addWidget(self.mining_progress)
         bottom.addWidget(mining, 3)
@@ -469,11 +476,66 @@ class MainWindow(QMainWindow):
         self.connection_progress.setValue(number)
         text = connection.get("message", "Connect Twitch to get started.")
         diagnostic = connection.get("diagnostic")
+        self.visible_diagnostic = None
         if phase == "attention" and diagnostic:
-            text += f" ({diagnostic.get('code', '')} · {diagnostic.get('stage', '')} · {diagnostic.get('reason', '')})"
+            safe = SessionDiagnostic.from_dict(diagnostic)
+            self.visible_diagnostic = safe
+            text = f"{self._connection_guidance(safe, connection.get('can_recover', False))} ({safe.code} · {safe.stage} · {safe.reason})"
         self.connection_message.setText(text)
         self.recover_button.setVisible(phase == "attention" and connection.get("can_recover", False))
         self.recover_button.setEnabled(not self.login_busy and phase == "attention")
+        self.copy_diagnostics.setVisible(self.visible_diagnostic is not None)
+
+    def _connection_guidance(self, diagnostic, can_recover):
+        if diagnostic.code == "SAVE":
+            return "The session could not be saved. Check free space and write access to the miner’s data folder, then retry."
+        if diagnostic.code == "ACCOUNT_MISMATCH":
+            return "Twitch returned a different account. Sign out in the miner if connected, then connect with the intended account."
+        if diagnostic.code == "HELPER_FIREFOX_VERSION":
+            return "Update Firefox to version 143 or later, or choose Chrome or Chromium for sign-in."
+        if diagnostic.stage in ("browser_start", "browser_login", "browser_capture") or diagnostic.code.startswith("HELPER_"):
+            return "Close the sign-in window normally if it is still open. To retry a failed sign-in, open Connect Twitch and try another installed browser."
+        if diagnostic.reason in ("tls", "dns", "connection"):
+            return "Check that Twitch opens in your browser and check your network connection. Then retry the connection."
+        if can_recover:
+            return "Select Retry saved session to verify your connection and reload campaigns."
+        return "Sign out in the miner if connected, then use Connect Twitch to start a fresh sign-in."
+
+    def _copy_connection_diagnostics(self):
+        if self.visible_diagnostic is not None:
+            data = {"desktop": "2.5.0 r6", **self.visible_diagnostic.to_dict()}
+            QGuiApplication.clipboard().setText(json.dumps(data, indent=2))
+            self.show_notice("Copied connection diagnostics.")
+
+    def _render_mining_health(self, health):
+        state = health.get("state")
+        messages = {
+            "paused": "Mining is paused. Select Resume mining to continue.",
+            "scheduled": "Outside your mining hours. Mining resumes in your next scheduled window.",
+            "loading": "Waiting for Twitch campaign data or updated mining preferences.",
+            "empty_list": "Your strict mining list is empty. Add a game or turn off Mine only games in this list.",
+            "no_live_channel": "No eligible live channel was found. The miner will keep looking.",
+            "selecting": "An eligible channel is available. The miner is selecting a stream.",
+            "waiting_reward": "Queued rewards are waiting for their start time or prerequisites.",
+            "link_account": "A campaign requires a linked game account. Check Campaigns for the game to link.",
+            "no_rewards": "No eligible rewards match your current preferences. Check Campaigns and your Mining list.",
+            "acquiring": "An eligible stream is live. Waiting for Twitch to identify the reward.",
+            "refreshing": "No confirmed progress. Refreshing campaigns and checking again.",
+            "switched": "Switched to another eligible channel. Waiting for confirmed progress.",
+            "stalled": "Twitch progress is stalled. Check the campaign and try Refresh campaigns.",
+        }
+        lines = [messages[state]] if state in messages else []
+        if health.get("selection") == "manual":
+            lines.append("Channel selected manually.")
+        elif health.get("selection") == "automatic":
+            lines.append("Channel selected by campaign eligibility and mining priorities.")
+        if health.get("confirmed_at"):
+            confirmed = datetime.fromisoformat(health["confirmed_at"]).astimezone()
+            lines.append(f"Last progress confirmed by Twitch: {confirmed:%d %b, %H:%M:%S}")
+        elif state in ("watching", "acquiring", "refreshing", "switched", "stalled"):
+            lines.append("Waiting for the first confirmed progress since connecting.")
+        self.mining_health.setText("\n".join(lines))
+        self.mining_health.setVisible(bool(lines))
 
     def _render_queue(self, rows):
         # The visible ETA has minute precision; preserve selection between snapshots.
@@ -735,6 +797,7 @@ class MainWindow(QMainWindow):
         connection = data.get("connection") or {"phase": "ready" if data.get("logged_in") else "signed_out", "message": "Connected." if data.get("logged_in") else "Sign in to connect Twitch."}
         self._render_connection(connection)
         self._render_queue(data.get("queue", []))
+        self._render_mining_health(data.get("mining_health", {}))
         self.system_tray.update(data)
         logged_in = bool(data.get("logged_in"))
         self.refresh_button.setEnabled(logged_in and not self.closing)
@@ -1016,10 +1079,11 @@ class MainWindow(QMainWindow):
         if not success:
             if name == "login":
                 self._login_finished(False, message)
-            elif name == "finish_login" and self.login_busy and not self.login_cancelling:
+            elif (name == "finish_login" and self.login_busy and not self.login_cancelling
+                  and self.login_stage in ("login", "chromium_login", "firefox_login")):
                 self.finish_login.setEnabled(True)
-                self.login_stage = "login"
                 self.connect_button.setText("Waiting for Twitch…")
+                self.login_hint.setText(message)
             self.show_notice(message, persistent=True)
 
     def _toggle_pause(self):

@@ -1,7 +1,7 @@
 # Windows desktop edition
 
 This Windows fork packages the miner and a native desktop interface into
-`Twitch Drops Miner.exe` (desktop r5). Download the ZIP from this fork's
+`Twitch Drops Miner.exe` (desktop r6). Download the ZIP from this fork's
 [Releases](https://github.com/Cavad/TwitchDropsMiner/releases), extract it and run the
 executable from a permanent, writable folder.
 Close any older miner instance first. Python and Docker are not needed to run it.
@@ -97,3 +97,20 @@ license notices, build-verification report and source-commit/run provenance.
 Downloading Actions artifacts requires a GitHub login; published release assets
 can be downloaded normally. The workflow does not need Twitch credentials or
 publisher secrets and does not log into Twitch.
+
+## Watch progress and recovery
+
+The overview shows the last time watch minutes increased in Twitch data since
+connecting. The progress bar may also include locally estimated watch minutes.
+After five minutes without confirmed progress on an eligible stream, the miner
+refreshes the inventory. If progress remains unchanged for another three minutes
+of eligible watching, it tries one alternate channel for the same reward, when
+available. It preserves manual channel selections. If no alternate is available
+or progress still does not advance after five more minutes, the overview and
+optional tray notification flag the stall. Paused and scheduled-off time does
+not count toward the watchdog.
+
+When the miner is idle, the overview distinguishes campaign loading, an empty
+strict Mining list, missing account links, and a lack of eligible live streams.
+If Twitch session verification fails, **Copy diagnostics** copies fixed error
+codes and status fields without copying session files, usernames, or raw logs.

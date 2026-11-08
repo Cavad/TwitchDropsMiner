@@ -508,6 +508,7 @@ def test_cached_inventory_does_not_report_ready_during_refresh(app, monkeypatch,
                                      session_controller=SimpleNamespace(status=lambda: {}, session=SimpleNamespace(seed=lambda: None)),
                                      pause_info=lambda: {}, drop_history=SimpleNamespace(get_entries=lambda **kwargs: [], total_count=0))
     monkeypatch.setattr(MiningPlanner, "build", lambda _: [])
+    monkeypatch.setattr(engine.mining_health, "update", lambda *args, **kwargs: {})
     assert engine._snapshot()["connection"]["phase"] == expected
 
 
@@ -574,3 +575,27 @@ async def test_native_helper_uses_selected_browser_without_skipping_session_flow
     select.assert_called_once_with("firefox")
     engine.client.enable_helper.assert_awaited_once()
     engine.client.cancel_helper.assert_not_awaited()
+
+
+def test_copy_connection_diagnostics_projects_safe_fields_only(window, app):
+    widget, _ = window
+    widget._render_connection({
+        "phase": "attention", "can_recover": True,
+        "diagnostic": {"code": "SAVE", "stage": "persistence", "reason": "secret-value",
+                       "session": "secret-value", "http_status": 503},
+    })
+    assert "write access" in widget.connection_message.text()
+    widget.copy_diagnostics.click()
+    copied = app.clipboard().text()
+    assert "secret-value" not in copied
+    assert '"code": "SAVE"' in copied
+    assert '"http_status": 503' in copied
+
+
+def test_late_finish_error_does_not_reopen_manual_login_controls(window):
+    widget, _ = window
+    widget.login_busy = True
+    widget._login_phase("capturing")
+    widget._command_finished("finish_login", False, "Previous window closed")
+    assert widget.login_stage == "capturing"
+    assert widget.finish_login.isHidden()

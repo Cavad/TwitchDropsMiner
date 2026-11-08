@@ -48,7 +48,7 @@ jobs:
         shell: bash
         run: |
           source env/bin/activate
-          python -m ruff check src desktop desktop_main.py tests/test_desktop.py tests/test_desktop_features.py tests/test_windows_browser.py
+          python -m ruff check src desktop desktop_main.py tests/test_desktop.py tests/test_desktop_features.py tests/test_windows_browser.py tests/test_mining_health.py
           python -m pytest -q --junitxml=core-tests.xml
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -86,7 +86,7 @@ jobs:
       - name: Test native UI, session recovery and Windows browser ownership
         run: |
           . ./env/Scripts/Activate.ps1
-          python -m pytest tests/test_desktop.py tests/test_desktop_features.py tests/test_windows_browser.py tests/test_session_controller.py tests/test_server_renewal.py tests/test_renewal_profile_cleanup.py tests/test_helper_diagnostics.py tests/test_priority_fallback.py tests/test_reward_priority.py tests/test_wanted_queue_order.py -q --junitxml=desktop-tests.xml
+          python -m pytest tests/test_desktop.py tests/test_desktop_features.py tests/test_windows_browser.py tests/test_mining_health.py tests/test_session_controller.py tests/test_server_renewal.py tests/test_renewal_profile_cleanup.py tests/test_helper_diagnostics.py tests/test_priority_fallback.py tests/test_reward_priority.py tests/test_wanted_queue_order.py -q --junitxml=desktop-tests.xml
           if ($LASTEXITCODE -ne 0) { throw 'Native desktop tests failed' }
       - name: Build portable desktop EXE
         run: |
@@ -125,7 +125,7 @@ jobs:
       - name: Package EXE, guide, license and build provenance
         run: |
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          @("Repository: $env:GITHUB_REPOSITORY", "Commit: $env:GITHUB_SHA", "Run: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", 'Python: 3.12; Windows x64; desktop r5', 'This smoke check does not authenticate to Twitch or verify live reward accrual.') | Set-Content dist/BUILD-INFO.txt -Encoding utf8
+          @("Repository: $env:GITHUB_REPOSITORY", "Commit: $env:GITHUB_SHA", "Run: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", 'Python: 3.12; Windows x64; desktop r6', 'This smoke check does not authenticate to Twitch or verify live reward accrual.') | Set-Content dist/BUILD-INFO.txt -Encoding utf8
           Compress-Archive -LiteralPath 'dist/Twitch Drops Miner.exe', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'docs/windows-desktop.md', 'dist/build-verification.json', 'dist/BUILD-INFO.txt' -DestinationPath release-assets/Twitch-Drops-Miner-Desktop-Windows-x64.zip
           $hash = (Get-FileHash -LiteralPath release-assets/Twitch-Drops-Miner-Desktop-Windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  Twitch-Drops-Miner-Desktop-Windows-x64.zip" | Set-Content release-assets/SHA256SUMS -Encoding ascii

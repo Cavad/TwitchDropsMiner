@@ -66,6 +66,7 @@ class NotificationTracker:
     def __init__(self):
         self.seen: set[str] | None = None
         self.attention = None
+        self.stalled = False
 
     def update(self, data: dict) -> list[tuple[str, str]]:
         entries = data.get("history", [])
@@ -89,4 +90,10 @@ class NotificationTracker:
                 self.attention = key
         elif connection.get("phase") == "ready":
             self.attention = None
+        state = data.get("mining_health", {}).get("state")
+        if state == "stalled" and not self.stalled:
+            messages.append(("Twitch watch progress stalled", "Open the miner to check the active reward and channel."))
+            self.stalled = True
+        elif state in ("signed_out", "watching", "switched"):
+            self.stalled = False
         return messages

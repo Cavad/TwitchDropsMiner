@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from PySide6.QtCore import QThread, Signal
 
+from desktop.mining_health import MiningHealth
 from desktop.planning import MiningPlanner
 from desktop.preferences import DesktopPreferences
 
@@ -40,6 +41,7 @@ class MinerEngine(QThread):
         self.preferences = DesktopPreferences()
         self.connection: dict[str, Any] = {"phase": "starting", "message": "Starting the local miner…", "code": ""}
         self.recovering = False
+        self.mining_health = MiningHealth()
         self.connection_error = None
 
     def _set_connection(self, phase, message, diagnostic=None, attempt=0):
@@ -175,6 +177,12 @@ class MinerEngine(QThread):
             else:
                 self.connection = {"phase": "signed_out", "code": "", "message": "Sign in to connect Twitch."}
         can_recover = self.client.session_controller.session.seed() is not None and not session.get("renewal_requires_login")
+        progress = gui.progress.get_current_drop()
+        queue = MiningPlanner.build(self.client)
+        mining_health = self.mining_health.update(
+            self.client, logged_in=logged_in, ready=not busy and self.connection["phase"] == "ready",
+            progress=progress, queue=queue,
+        )
         return copy.deepcopy({
             "status": gui.status.get(),
             "login": gui.login.get_status(),
@@ -183,13 +191,14 @@ class MinerEngine(QThread):
             "logged_in": logged_in,
             "pause": self.client.pause_info(),
             "progress": gui.progress.get_current_drop(),
+            "mining_health": mining_health,
             "channels": gui.channels.get_channels(),
             "campaigns": gui.inv.get_campaigns(),
             "settings": gui.settings.get_settings(),
             "lines": gui.output.get_history()[-250:],
             "history": self.client.drop_history.get_entries(limit=500),
             "total_claimed": self.client.drop_history.total_count,
-            "queue": MiningPlanner.build(self.client),
+            "queue": queue,
         })
 
     async def _publish_loop(self):
@@ -267,7 +276,13 @@ class MinerEngine(QThread):
             self.snapshot.emit(self._snapshot())
             self.command_finished.emit(name, True, "")
         except SessionError as error:
-            self.command_finished.emit(name, False, f"Action could not finish ({error.code}). Please try again.")
+            if name == "finish_login" and error.code == "HELPER_BROWSER":
+                guidance = "Close the Twitch sign-in window normally to continue. If it is unresponsive, cancel and try another browser."
+            else:
+                from src.auth.helper_errors import HelperDiagnostics
+
+                _, guidance = HelperDiagnostics.describe(error.code)
+            self.command_finished.emit(name, False, f"{guidance} ({error.code})")
         except Exception:
             logging.getLogger("TwitchDrops.desktop").exception("Desktop command failed: %s", name)
             self.command_finished.emit(name, False, "The action could not finish. Please try again.")
