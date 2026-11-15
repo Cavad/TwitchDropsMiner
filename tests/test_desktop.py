@@ -655,6 +655,73 @@ async def test_helper_admission_race_only_succeeds_if_session_is_ready(app, conn
         engine.client.cancel_helper.assert_awaited_once()
 
 
+def connected_client(state):
+    return SimpleNamespace(
+        cancel_helper=AsyncMock(),
+        _auth_state=SimpleNamespace(_logged_in=SimpleNamespace(is_set=lambda: state["connected"])),
+        session_controller=SimpleNamespace(session=SimpleNamespace(
+            status=lambda: {"state": "ready" if state["connected"] else "logged_out"},
+        )),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("connected", [True, False])
+async def test_admitted_sign_in_failure_is_not_an_error_once_saved_session_connects(app, monkeypatch, connected):
+    from src.auth.session_bundle import SessionError
+
+    state = {"connected": False}
+    engine = MinerEngine()
+    engine.port = 1
+    engine.client = connected_client(state)
+
+    async def admit(_authorized):
+        return None
+
+    class ExpiringHelper:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def run(self):
+            # The saved session restores while the browser sign-in is still open.
+            state["connected"] = connected
+            raise SessionError("HELPER_EXPIRED", stage="helper_admission", reason="http_error")
+
+    engine.client.enable_helper = admit
+    outcomes = []
+    engine.login_finished.connect(lambda success, message: outcomes.append((success, message)))
+    monkeypatch.setattr("src.auth.login_helper.NativeLoginHelper", ExpiringHelper)
+    await engine._login()
+    assert outcomes[0][0] is connected
+    # The admission window is closed either way, so no helper can be admitted later.
+    engine.client.cancel_helper.assert_awaited_once()
+    if connected:
+        assert engine.connection_error is None and engine.login_diagnostic is None
+    else:
+        assert engine.connection_error.code == "HELPER_EXPIRED"
+        assert engine.login_diagnostic is engine.connection_error
+
+
+def test_failed_sign_in_diagnostic_clears_when_saved_session_connects_later(app):
+    from src.auth.session_bundle import SessionError
+
+    state = {"connected": False}
+    engine = MinerEngine()
+    engine.client = connected_client(state)
+    failure = SessionError("HELPER_EXPIRED", stage="helper_admission", reason="http_error").diagnostic
+    engine.connection_error = engine.login_diagnostic = failure
+    engine._clear_stale_login_error()
+    assert engine.connection_error is failure
+    state["connected"] = True
+    engine._clear_stale_login_error()
+    assert engine.connection_error is None and engine.login_diagnostic is None
+    # Renewal and recovery failures are not sign-in leftovers and stay visible.
+    renewal = SessionError("SDK_TIMEOUT", stage="renewal_issuance", reason="timeout").diagnostic
+    engine.connection_error = renewal
+    engine._clear_stale_login_error()
+    assert engine.connection_error is renewal
+
+
 @pytest.mark.asyncio
 async def test_late_finish_without_owned_browser_is_successful_noop(app):
     engine = MinerEngine()

@@ -46,6 +46,19 @@ class MinerEngine(QThread):
         self.mining_health = MiningHealth()
         self.overnight_recap = OvernightRecap()
         self.connection_error = None
+        # The diagnostic of the last failed sign-in attempt. It stops mattering once
+        # the saved session is connected, for example after a restore won a race.
+        self.login_diagnostic = None
+
+    def _session_connected(self) -> bool:
+        return (self.client._auth_state._logged_in.is_set()
+                and self.client.session_controller.session.status()["state"] == "ready")
+
+    def _clear_stale_login_error(self) -> None:
+        """A failed sign-in must not hide a saved session that connected anyway."""
+        if (self.connection_error is not None and self.connection_error is self.login_diagnostic
+                and self._session_connected()):
+            self.connection_error = self.login_diagnostic = None
 
     def _set_connection(self, phase, message, diagnostic=None, attempt=0):
         self.connection = {"phase": phase, "message": message, "attempt": attempt,
@@ -166,6 +179,7 @@ class MinerEngine(QThread):
         logged_in = self.client._auth_state._logged_in.is_set()
         busy = self.recovering or self.login_task is not None and not self.login_task.done()
         if not busy:
+            self._clear_stale_login_error()
             diagnostic = session.get("renewal_diagnostic") or (self.connection_error.to_dict() if self.connection_error else None)
             if diagnostic:
                 self.connection = {"phase": "attention", "message": "Session verification needs attention. Retry the saved session or sign in again.",
@@ -310,6 +324,7 @@ class MinerEngine(QThread):
 
         success = False
         admitted = False
+        close_admission = False
         self.connection_error = None
         self._set_connection("signing_in", "Opening the sign-in browser…")
         message = "Sign-in cancelled. You can reconnect whenever you are ready."
@@ -341,12 +356,15 @@ class MinerEngine(QThread):
             self.connection_error = SessionDiagnostic(code="HELPER_LOGIN_TIMEOUT", stage="browser_login", reason="timeout")
             message = "Sign-in timed out. You can retry, or select Firefox if Twitch's code page keeps spinning."
         except SessionError as error:
-            if (not admitted and error.code == "HELPER_STATE"
+            if ((not admitted and error.code == "HELPER_STATE"
                     and (self.client._auth_state._logged_in.is_set()
-                         or self.client.session_controller.session.status()["state"] == "ready")):
+                         or self.client.session_controller.session.status()["state"] == "ready"))
+                    or (admitted and self._session_connected())):
                 # Restoring the saved session can win the race with a new login
-                # request. The validated session belongs to the existing flow.
+                # request, before or after admission. The validated session belongs
+                # to the existing flow, so the abandoned sign-in is not an error.
                 success = True
+                close_admission = admitted
                 message = "Twitch session restored. Checking your eligible campaigns…"
                 self._set_connection("loading", message)
             else:
@@ -362,7 +380,8 @@ class MinerEngine(QThread):
             message = "Sign-in could not finish. Close its browser window and try again."
         finally:
             self.active_login_browser = None
-            if not success and not self.stopping:
+            self.login_diagnostic = None if success else self.connection_error
+            if (not success or close_admission) and not self.stopping:
                 try:
                     await asyncio.wait_for(self.client.cancel_helper(), timeout=10)
                 except Exception:
