@@ -154,26 +154,60 @@ def test_successful_login_renders_actual_snapshot_and_changes_primary_action(win
     assert engine.commands[-1] == ("pause", True)
 
 
-@pytest.mark.parametrize("success", [True, False])
-def test_save_acknowledgement_preserves_edits_made_while_save_pending(window, success):
-    widget, engine = window
-    widget.game_picker.setCurrentText("Saved game")
-    widget._add_game()
-    widget.save_button.click()
-    submitted = engine.commands[-1][1]
-    assert submitted["games_to_watch"] == ["First game", "Saved game"]
-    widget.game_picker.setCurrentText("Later edit")
-    widget._add_game()
+def acknowledge_games(engine, games, success=True, **extra):
     data = snapshot()
     if success:
-        data["settings"]["games_to_watch"] = submitted["games_to_watch"]
+        data["settings"].update({"games_to_watch": games, **extra})
     engine.snapshot.emit(data)
-    engine.command_finished.emit("settings", success, "Failed" if not success else "")
-    assert widget._game_names() == ["First game", "Saved game", "Later edit"]
-    assert widget.settings_dirty
-    assert widget.save_button.isEnabled()
+    engine.command_finished.emit("games", success, "" if success else "Failed")
+
+
+def test_mining_list_edits_save_immediately_and_queue_later_edits(window):
+    widget, engine = window
+    widget.game_picker.setCurrentText("Second game")
+    widget._add_game()
+    assert engine.commands[-1] == ("games", {
+        "games_to_watch": ["First game", "Second game"], "priority_list_only": True,
+        "allow_unlinked_campaigns": False,
+    })
+    widget.game_picker.setCurrentText("Third game")
+    widget._add_game()
+    # One save at a time; the newer edit waits for the acknowledgement.
+    assert sum(name == "games" for name, _ in engine.commands) == 1
+    acknowledge_games(engine, ["First game", "Second game"])
+    assert widget._game_names() == ["First game", "Second game", "Third game"]
+    assert engine.commands[-1][1]["games_to_watch"] == ["First game", "Second game", "Third game"]
+    acknowledge_games(engine, ["First game", "Second game", "Third game"])
+    assert not widget._games_dirty()
+    assert widget.games_status.text() == "Mining list saved."
+    assert not widget.save_button.isEnabled()
+
+
+def test_failed_mining_list_save_keeps_edits_and_offers_retry(window):
+    widget, engine = window
+    widget.game_picker.setCurrentText("Second game")
+    widget._add_game()
+    acknowledge_games(engine, [], success=False)
+    assert widget._game_names() == ["First game", "Second game"]
+    assert widget._games_dirty() and not widget.games_retry.isHidden()
+    assert "not saved" in widget.games_status.text()
+    # Later snapshots of the old saved list must not discard the unsaved edit.
+    engine.snapshot.emit(snapshot())
+    assert widget._game_names() == ["First game", "Second game"]
+    widget.games_retry.click()
+    assert engine.commands[-1][1]["games_to_watch"] == ["First game", "Second game"]
+    acknowledge_games(engine, ["First game", "Second game"])
+    assert not widget._games_dirty() and widget.games_retry.isHidden()
+
+
+def test_reward_settings_save_without_resending_the_mining_list(window):
+    widget, engine = window
+    widget.interval.setValue(45)
     widget.save_button.click()
-    assert engine.commands[-1][1]["games_to_watch"][-1] == "Later edit"
+    assert engine.commands[-1] == ("settings", {
+        "mining_benefits": dict.fromkeys(("DIRECT_ENTITLEMENT", "BADGE", "EMOTE", "UNKNOWN"), True),
+        "minimum_refresh_interval_minutes": 45,
+    })
 
 
 def test_successful_save_clears_dirty_only_after_confirmed_snapshot(window):
@@ -190,16 +224,16 @@ def test_successful_save_clears_dirty_only_after_confirmed_snapshot(window):
     assert widget._game_names() == ["First game", "Second game"]
 
 
-def test_campaign_text_is_plain_and_addition_preserves_draft_settings(window):
+def test_campaign_addition_saves_once_and_keeps_the_campaigns_page(window):
     widget, engine = window
-    widget.game_picker.setCurrentText("Unsaved game")
-    widget._add_game()
+    widget.navigate(1)
     widget._add_campaign_game("Campaign game")
-    assert widget._game_names() == ["First game", "Unsaved game", "Campaign game"]
-    assert widget.pages.currentIndex() == 4
-    assert not engine.commands
+    assert widget._game_names() == ["First game", "Campaign game"]
+    assert widget.pages.currentIndex() == 1
+    assert engine.commands[-1][0] == "games"
     widget._add_campaign_game("CAMPAIGN GAME")
-    assert widget.games_list.count() == 3
+    assert widget.games_list.count() == 2
+    assert sum(name == "games" for name, _ in engine.commands) == 1
 
 
 def add_buttons(widget):
@@ -209,24 +243,72 @@ def add_buttons(widget):
             if button.text().startswith("Add to mining list")]
 
 
-def test_campaign_add_action_follows_saved_mining_list(window):
+def test_campaign_add_action_follows_mining_list(window):
     widget, engine = window
     data = snapshot()
     data["campaigns"] = [{"game_name": "Second game", "name": "November", "drops": [], "active": True}]
     engine.snapshot.emit(data)
     assert len(add_buttons(widget)) == 1
-    widget._add_campaign_game("Second game")
-    widget.save_button.click()
-    assert all(not button.isEnabled() for button in add_buttons(widget))
-    saved = copy.deepcopy(data)
-    saved["settings"]["games_to_watch"] = ["First game", "SECOND GAME"]
-    engine.snapshot.emit(saved)
-    engine.command_finished.emit("settings", True, "")
-    # Campaign data is unchanged; the saved list alone must remove the stale action.
+    add_buttons(widget)[0].click()
+    # The action disappears as soon as the game is added, before the save completes.
     assert add_buttons(widget) == []
-    engine.snapshot.emit(data)
+    saved = copy.deepcopy(data)
+    saved["settings"]["games_to_watch"] = ["First game", "Second game"]
+    engine.snapshot.emit(saved)
+    engine.command_finished.emit("games", True, "")
+    assert add_buttons(widget) == []
+    widget.games_list.setCurrentRow(1)
+    widget._remove_game()
     assert len(add_buttons(widget)) == 1
-    assert add_buttons(widget)[0].isEnabled()
+
+
+def test_campaign_add_action_hides_for_games_loaded_in_the_same_update(window):
+    widget, engine = window
+    data = snapshot()
+    data["settings"]["games_to_watch"] = ["First game", "Second game"]
+    data["campaigns"] = [{"game_name": "Second game", "name": "November", "drops": [], "active": True}]
+    engine.snapshot.emit(data)
+    assert add_buttons(widget) == []
+
+
+def unlinked_campaign(game="First game", url="https://example.com/link", **extra):
+    return {"game_name": game, "name": "Campaign", "linked": False, "link_url": url, "expired": False,
+            "drops": [{"name": "Reward", "benefits": [{"type": "DIRECT_ENTITLEMENT"}]}], **extra}
+
+
+def test_mining_list_marks_unlinked_games_and_opens_their_link(window, monkeypatch):
+    widget, engine = window
+    opened = []
+    monkeypatch.setattr("desktop.window.QDesktopServices.openUrl", lambda url: opened.append(url.toString()))
+    data = snapshot()
+    data["campaigns"] = [unlinked_campaign()]
+    engine.snapshot.emit(data)
+    item = widget.games_list.item(0)
+    assert item.text() == "First game   ⚠ Account not linked"
+    assert widget._game_names() == ["First game"]
+    assert not widget.link_button.isEnabled()
+    widget.games_list.setCurrentRow(0)
+    assert widget.link_button.isEnabled()
+    widget.link_button.click()
+    assert opened == ["https://example.com/link"]
+    link = next(b for b in widget.findChildren(QPushButton) if b.text().startswith("Link account on Twitch"))
+    link.click()
+    assert opened[-1] == "https://example.com/link"
+    data["campaigns"] = [unlinked_campaign(linked=True)]
+    engine.snapshot.emit(data)
+    assert item.text() == "First game" and not widget.link_button.isEnabled()
+
+
+def test_unlinked_toggle_saves_with_the_mining_list(window):
+    widget, engine = window
+    widget.allow_unlinked.setChecked(True)
+    assert engine.commands[-1] == ("games", {
+        "games_to_watch": ["First game"], "priority_list_only": True, "allow_unlinked_campaigns": True,
+    })
+    acknowledge_games(engine, ["First game"], allow_unlinked_campaigns=True)
+    assert widget.allow_unlinked.isChecked()
+    engine.snapshot.emit({**snapshot(), "settings": {**snapshot()["settings"], "allow_unlinked_campaigns": False}})
+    assert not widget.allow_unlinked.isChecked()
 
 
 def test_export_uses_entire_backend_content_and_reports_unwritable_path(window, tmp_path):

@@ -286,6 +286,12 @@ class MinerEngine(QThread):
             elif name == "settings":
                 self.client.gui.settings.update_settings(payload)
                 self.notice.emit("Settings saved.")
+            elif name == "games":
+                # The Mining list card saves on every change, without a notice per edit.
+                allowed = {"games_to_watch", "priority_list_only", "allow_unlinked_campaigns"}
+                if not isinstance(payload, dict) or not payload or set(payload) - allowed:
+                    raise ValueError("Invalid Mining list update")
+                self.client.gui.settings.update_settings(payload)
             elif name == "pause":
                 self.client.set_paused(bool(payload))
             elif name == "refresh":

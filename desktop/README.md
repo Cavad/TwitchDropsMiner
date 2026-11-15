@@ -17,8 +17,10 @@ background; no campaign page needs to be browsed or clicked. Manually closing th
 sign-in window still works. Passwords and verification codes are entered only at Twitch.
 If sign-in fails, the app shows the helper's existing error guidance and allows retry. Cancel waits for owned-browser cleanup before reenabling sign-in. A five-minute timeout prevents an unbounded wait. Windows profile cleanup retries transient file locks off the miner loop, for at most 7.75 seconds of retry delays. The overview scrolls vertically when long error messages or narrow windows need more room.
 
-Set your game priorities in **Settings**, then choose **Save changes**. Drag to reorder
-or use the move buttons. Reward preferences and the refresh interval are also editable.
+Set your game priorities in **Settings**; Mining list changes save immediately. Drag to
+reorder or use the move buttons. Games needing a linked account show **Account not
+linked** with a **Link account** button. Reward preferences and the refresh interval
+use **Save changes**.
 **Campaigns** shows actual reward progress. **History** exports the full local claim
 history as Excel-compatible UTF-8 CSV. **Activity** shows recent engine messages.
 

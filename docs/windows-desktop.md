@@ -35,9 +35,18 @@ campaigns within a game. Existing explicit reward-priority and temporary game-or
 rules retain precedence. The miner discovers campaigns and switches eligible live
 channels automatically. No manual Twitch campaign browsing is required.
 
-Use **Settings** to order games. Disable **Mine only games in this list** to permit
-other eligible games after the selected games. An empty strict list can leave the
-miner idle. **Prioritize campaigns nearing expiry** is enabled by default and can
+Use **Settings** to order games. Mining list changes save immediately: adding,
+removing or reordering a game, **Add to mining list** on a campaign card, and the two
+checkboxes below the list. If a save fails, your edits stay in the list and **Retry**
+sends them again. Disable **Mine only games in this list** to permit other eligible
+games after the selected games. An empty strict list can leave the miner idle.
+
+Games whose current campaigns need a linked game account that Twitch reports as not
+linked show **Account not linked** in the Mining list. Their campaigns are skipped.
+Select the game and choose **Link account**, or use **Link account on Twitch** on its
+campaign card, to open the link page Twitch provides. Badge and emote campaigns do
+not need a link. **Also try campaigns whose game account is not linked** mines them
+anyway, but Twitch may not credit progress or deliver rewards. **Prioritize campaigns nearing expiry** is enabled by default and can
 be disabled under **Desktop behavior**.
 
 Watch-time estimates include unclaimed prerequisites. Budgeted finish times allocate
@@ -62,8 +71,9 @@ can extend them, while simultaneous campaign progress can shorten them.
   Enabling it registers this executable for the current Windows user and launches it
   in the tray at sign-in. Save it in a permanent folder before enabling this option.
   Disable the option before moving or deleting the executable.
-- Select **Save desktop options** to apply these options. Mining preferences use the
-  separate **Save changes** action. Unsaved drafts are retained while hidden in the tray.
+- Select **Save desktop options** to apply these options. Reward preferences and the
+  refresh interval use the separate **Save changes** action; the Mining list saves on
+  its own. Unsaved drafts are retained while hidden in the tray.
 
 ## Data and verification limits
 

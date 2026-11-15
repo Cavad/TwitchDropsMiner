@@ -164,3 +164,43 @@ def test_native_queue_switches_to_earlier_deadline_channel_without_overriding_ga
     assert not WatchService(client).should_switch(channels[2])
     soon.can_earn = lambda _: False
     assert client._channel_service.get_mining_priority(channels[1]) < client._channel_service.get_mining_priority(channels[0])
+
+
+def test_game_link_status_follows_account_and_reward_rules():
+    from desktop.model import game_link_status, safe_link_url
+
+    def campaign(**fields):
+        return {"game_name": "Nikke", "linked": False, "expired": False, "link_url": "https://example.com/link",
+                "drops": [{"benefits": [{"type": "DIRECT_ENTITLEMENT"}]}], **fields}
+
+    assert game_link_status([], "Nikke") == (None, "")
+    assert game_link_status([campaign()], "NIKKE") == ("not_linked", "https://example.com/link")
+    # One linked campaign links the game account.
+    assert game_link_status([campaign(), campaign(linked=True)], "Nikke") == ("linked", "")
+    # Badge and emote rewards are mined without a linked account.
+    badge = campaign(drops=[{"benefits": [{"type": "BADGE"}]}])
+    assert game_link_status([badge], "Nikke") == (None, "")
+    assert game_link_status([campaign(expired=True)], "Nikke") == (None, "")
+    assert game_link_status([campaign(link_url="javascript:alert(1)")], "Nikke") == ("not_linked", "")
+    for unsafe in ("http://example.com", "https://user:pass@example.com", "", None, "https://" + "a" * 2050):
+        assert safe_link_url(unsafe) == ""
+
+
+@pytest.mark.asyncio
+async def test_engine_mining_list_command_accepts_only_its_fields():
+    pytest.importorskip("PySide6")
+    from desktop.engine import MinerEngine
+
+    engine = MinerEngine()
+    update = Mock()
+    engine.client = SimpleNamespace(gui=SimpleNamespace(settings=SimpleNamespace(update_settings=update)))
+    engine._snapshot = Mock(return_value={})
+    outcomes = []
+    engine.command_finished.connect(lambda *args: outcomes.append(args))
+    payload = {"games_to_watch": ["Nikke"], "priority_list_only": True, "allow_unlinked_campaigns": False}
+    await engine._dispatch("games", payload)
+    update.assert_called_once_with(payload)
+    await engine._dispatch("games", {"proxy": "http://example.com"})
+    await engine._dispatch("games", {})
+    assert update.call_count == 1
+    assert [success for _name, success, _message in outcomes] == [True, False, False]

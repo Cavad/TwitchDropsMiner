@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QLayout,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -46,7 +47,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from desktop.model import campaign_matches, desktop_home, progress_percent
+from desktop.model import (
+    campaign_matches,
+    desktop_home,
+    game_link_status,
+    progress_percent,
+    safe_link_url,
+)
 from desktop.planning import MiningPlanner
 from desktop.preferences import DesktopPreferences
 from desktop.system_tray import SystemTrayController
@@ -221,6 +228,14 @@ class MainWindow(QMainWindow):
         self.settings_saving = False
         self.settings_revision = 0
         self.saving_revision = 0
+        # The Mining list card saves on every change. Revisions keep later edits
+        # from being marked saved by an earlier acknowledgement.
+        self.games_revision = 0
+        self.games_saved_revision = 0
+        self.games_sending_revision = 0
+        self.games_saving = False
+        self.games_failed = False
+        self.games_signature = None
         self.closing = False
         self.export_path = None
         self.campaign_signature = None
@@ -592,9 +607,9 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "campaign_layout"):
             return
         campaigns = [c for c in self.data.get("campaigns", []) if campaign_matches(c, self.campaign_search.text(), self.campaign_filter.currentText())]
-        # The add action depends on the saved Mining list and save state, not only campaign data.
-        selected = sorted({name.casefold() for name in self.data.get("settings", {}).get("games_to_watch", [])})
-        signature = json.dumps([campaigns, selected, self.settings_saving], sort_keys=True)
+        # The add action depends on the Mining list, not only campaign data.
+        selected = sorted({name.casefold() for name in self._game_names()})
+        signature = json.dumps([campaigns, selected], sort_keys=True)
         if self.campaign_signature == signature:
             return
         self.campaign_signature = signature
@@ -628,9 +643,10 @@ class MainWindow(QMainWindow):
                 inner.addWidget(progress)
             game = campaign.get("game_name", "")
             if game.casefold() not in selected:
-                add = button("Add to mining list  +", lambda checked=False, name=game: self._add_campaign_game(name), "link")
-                add.setEnabled(not self.settings_saving)
-                inner.addWidget(add)
+                inner.addWidget(button("Add to mining list  +", lambda checked=False, name=game: self._add_campaign_game(name), "link"))
+            status, link = game_link_status(self.data.get("campaigns", []), game)
+            if status == "not_linked" and link and not campaign.get("linked"):
+                inner.addWidget(button("Link account on Twitch  ↗", lambda checked=False, url=link: self._open_link(url), "link"))
             if campaign.get("id"):
                 inner.addWidget(button(
                     "Why am I not earning this?",
@@ -750,7 +766,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(16)
         games, inner = card()
         inner.addWidget(label("Mining list", "section"))
-        inner.addWidget(label("Drag to reorder, or use Move up / Move down. The first game has the highest priority.", "muted", True))
+        inner.addWidget(label("Drag to reorder, or use Move up / Move down. The first game has the highest priority. Changes save automatically.", "muted", True))
         add_row = QHBoxLayout()
         self.game_picker = QComboBox()
         self.game_picker.setEditable(True)
@@ -769,18 +785,34 @@ class MainWindow(QMainWindow):
         self.games_list.setMaximumHeight(180)
         self.games_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.games_list.setAccessibleName("Game mining priority")
-        self.games_list.model().rowsMoved.connect(self._settings_edited)
+        self.games_list.model().rowsMoved.connect(self._games_edited)
+        self.games_list.currentRowChanged.connect(self._update_link_button)
         inner.addWidget(self.games_list)
         order = QHBoxLayout()
         order.addWidget(button("↑  Move up", lambda: self._move_game(-1)))
         order.addWidget(button("↓  Move down", lambda: self._move_game(1)))
         order.addStretch()
+        self.link_button = button("Link account  ↗", self._open_selected_link, name="linkAccountButton")
+        self.link_button.setToolTip("Opens the game's account-link page from Twitch in your browser.")
+        self.link_button.setEnabled(False)
+        order.addWidget(self.link_button)
         order.addWidget(button("Remove", self._remove_game))
         inner.addLayout(order)
         self.strict_games = QCheckBox("Mine only games in this list")
-        self.strict_games.toggled.connect(self._settings_edited)
+        self.strict_games.toggled.connect(self._games_edited)
         inner.addWidget(self.strict_games)
         inner.addWidget(label("Turn this off to include other eligible games after your selected games. An empty strict list can leave the miner idle.", "muted", True))
+        self.allow_unlinked = QCheckBox("Also try campaigns whose game account is not linked")
+        self.allow_unlinked.toggled.connect(self._games_edited)
+        inner.addWidget(self.allow_unlinked)
+        inner.addWidget(label("Games marked \"Account not linked\" are skipped unless you link the account or turn this on. Twitch may not credit progress or deliver rewards without a link.", "muted", True))
+        games_footer = QHBoxLayout()
+        self.games_status = label("", "muted", True)
+        games_footer.addWidget(self.games_status, 1)
+        self.games_retry = button("Retry", self._save_games, name="retryGamesButton")
+        self.games_retry.hide()
+        games_footer.addWidget(self.games_retry)
+        inner.addLayout(games_footer)
         layout.addWidget(games)
         policy, policy_layout = card()
         policy_layout.addWidget(label("Reward preferences", "section"))
@@ -853,6 +885,8 @@ class MainWindow(QMainWindow):
         self.status_line.setText("Your miner is ready. Connect Twitch to get started.")
         if hasattr(self.engine, "preferences"):
             self.engine.submit("desktop_policy", self.preferences.values["automatic_queue"])
+        if self._games_dirty():
+            self._save_games()
 
     def _update(self, data):
         self.data = data
@@ -901,6 +935,7 @@ class MainWindow(QMainWindow):
         self.queue_title.setText(f"{len(games)} {noun} in your list" if games else "Your games, your order.")
         self.queue_detail.setText("\n".join(f"{i+1:02}   {game}" for i, game in enumerate(games[:3])) if games else "Set a priority list to focus\non the rewards you want.")
         self._render_campaigns()
+        self._refresh_game_badges()
         self._render_history(data.get("history", []))
         self._render_recap(data.get("overnight_recap", {}))
         lines = "\n".join(data.get("lines", []))
@@ -958,16 +993,34 @@ class MainWindow(QMainWindow):
                 and not self.closing and self.preferences.values["close_to_tray"]):
             QTimer.singleShot(0, self._hide_to_tray)
 
+    def _load_games(self, settings):
+        signature = json.dumps([settings.get(key) for key in ("games_to_watch", "priority_list_only", "allow_unlinked_campaigns")])
+        if self._games_dirty() or self.games_saving or signature == self.games_signature:
+            return
+        self.games_signature = signature
+        current = self.games_list.currentItem()
+        selected = current.data(Qt.ItemDataRole.UserRole) if current else None
+        self.games_list.clear()
+        for name in settings.get("games_to_watch", []):
+            self.games_list.addItem(self._game_item(name))
+            if name == selected:
+                self.games_list.setCurrentRow(self.games_list.count() - 1)
+        for checkbox, key, default in ((self.strict_games, "priority_list_only", True),
+                                       (self.allow_unlinked, "allow_unlinked_campaigns", False)):
+            checkbox.blockSignals(True)
+            checkbox.setChecked(settings.get(key, default) is True)
+            checkbox.blockSignals(False)
+        self._refresh_game_badges()
+        self._render_campaigns()  # Card actions depend on the list just loaded.
+
     def _load_settings(self, settings):
+        if not settings:
+            return
+        self._load_games(settings)
         signature = json.dumps(settings, sort_keys=True)
-        if not settings or self.settings_dirty or self.settings_saving or signature == self.settings_signature:
+        if self.settings_dirty or self.settings_saving or signature == self.settings_signature:
             return
         self.settings_signature = signature
-        self.games_list.clear()
-        self.games_list.addItems(settings.get("games_to_watch", []))
-        self.strict_games.blockSignals(True)
-        self.strict_games.setChecked(settings.get("priority_list_only", True))
-        self.strict_games.blockSignals(False)
         self.interval.blockSignals(True)
         self.interval.setValue(settings.get("minimum_refresh_interval_minutes", 30))
         self.interval.blockSignals(False)
@@ -989,7 +1042,98 @@ class MainWindow(QMainWindow):
         self.save_button.setEnabled(self.engine_ready and not self.settings_saving)
 
     def _game_names(self):
-        return [self.games_list.item(i).text() for i in range(self.games_list.count())]
+        if not hasattr(self, "games_list"):
+            return []  # The Campaigns page is built before Settings.
+        return [self.games_list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.games_list.count())]
+
+    @staticmethod
+    def _game_item(name):
+        item = QListWidgetItem(name)
+        item.setData(Qt.ItemDataRole.UserRole, name)
+        return item
+
+    def _refresh_game_badges(self):
+        """Mark games whose campaigns need an account link, without rebuilding the list."""
+        if not hasattr(self, "link_button"):
+            return
+        campaigns = self.data.get("campaigns", [])
+        for index in range(self.games_list.count()):
+            item = self.games_list.item(index)
+            name = item.data(Qt.ItemDataRole.UserRole)
+            status, _url = game_link_status(campaigns, name)
+            text = f"{name}   ⚠ Account not linked" if status == "not_linked" else name
+            tip = ("Twitch reports this game's account is not linked, so its campaigns are skipped. Use Link account."
+                   if status == "not_linked" else "")
+            if item.text() != text:
+                item.setText(text)
+            if item.toolTip() != tip:
+                item.setToolTip(tip)
+        self._update_link_button()
+
+    def _selected_link(self):
+        item = self.games_list.currentItem()
+        if item is None:
+            return ""
+        status, url = game_link_status(self.data.get("campaigns", []), item.data(Qt.ItemDataRole.UserRole))
+        return url if status == "not_linked" else ""
+
+    def _update_link_button(self, *_args):
+        self.link_button.setEnabled(bool(self._selected_link()))
+
+    def _open_link(self, url):
+        url = safe_link_url(url)
+        if url:
+            from PySide6.QtCore import QUrl
+
+            QDesktopServices.openUrl(QUrl(url))
+
+    def _open_selected_link(self):
+        self._open_link(self._selected_link())
+
+    def _games_dirty(self):
+        return self.games_revision != self.games_saved_revision
+
+    def _games_edited(self, *_args):
+        self.games_revision += 1
+        self.games_failed = False
+        self._refresh_game_badges()
+        self._render_campaigns()
+        self._save_games()
+
+    def _save_games(self):
+        if self.games_saving or not self._games_dirty():
+            return
+        if not self.engine_ready:
+            self.games_status.setText("Your Mining list will save when the miner is ready.")
+            return
+        self.games_saving = True
+        self.games_sending_revision = self.games_revision
+        self.games_retry.hide()
+        self.games_status.setText("Saving…")
+        self.engine.submit("games", {
+            "games_to_watch": self._game_names(),
+            "priority_list_only": self.strict_games.isChecked(),
+            "allow_unlinked_campaigns": self.allow_unlinked.isChecked(),
+        })
+
+    def _games_finished(self, success):
+        self.games_saving = False
+        if success:
+            self.games_saved_revision = self.games_sending_revision
+        self.games_failed = not success
+        if self._games_dirty() and success:
+            self._save_games()  # Edits made while the earlier save was pending.
+            return
+        if success:
+            self.games_retry.hide()
+            self.games_status.setText("Mining list saved.")
+            self.games_signature = None
+            self._load_games(self.data.get("settings", {}))
+        else:
+            self.games_retry.show()
+            self.games_status.setText("Your Mining list was not saved. Your changes are kept here; select Retry.")
+            self.show_notice("Your Mining list could not be saved. Select Retry in Settings.", persistent=True)
+        self._render_campaigns()
 
     def _add_game(self):
         name = self.game_picker.currentText().strip()
@@ -998,9 +1142,9 @@ class MainWindow(QMainWindow):
         if name.casefold() in {game.casefold() for game in self._game_names()}:
             self.show_notice("This game is already in your mining list.")
             return
-        self.games_list.addItem(name)
+        self.games_list.addItem(self._game_item(name))
         self.game_picker.setCurrentText("")
-        self._settings_edited()
+        self._games_edited()
 
     def _move_game(self, direction):
         row = self.games_list.currentRow()
@@ -1010,13 +1154,13 @@ class MainWindow(QMainWindow):
         item = self.games_list.takeItem(row)
         self.games_list.insertItem(target, item)
         self.games_list.setCurrentRow(target)
-        self._settings_edited()
+        self._games_edited()
 
     def _remove_game(self):
         row = self.games_list.currentRow()
         if row >= 0:
             self.games_list.takeItem(row)
-            self._settings_edited()
+            self._games_edited()
 
     def _save_settings(self):
         if self.settings_saving or not self.engine_ready:
@@ -1027,20 +1171,17 @@ class MainWindow(QMainWindow):
         self.save_status.setText("Saving…")
         self._render_campaigns()
         self.engine.submit("settings", {
-            "games_to_watch": self._game_names(),
-            "priority_list_only": self.strict_games.isChecked(),
             "mining_benefits": {key: checkbox.isChecked() for key, checkbox in self.benefits.items()},
             "minimum_refresh_interval_minutes": self.interval.value(),
         })
 
     def _add_campaign_game(self, name):
-        if self.settings_saving:
+        if name.casefold() in {game.casefold() for game in self._game_names()}:
+            self.show_notice("This game is already in your mining list.")
             return
-        if name.casefold() not in {game.casefold() for game in self._game_names()}:
-            self.games_list.addItem(name)
-            self._settings_edited()
-        self.navigate(4)
-        self.show_notice("Game added to your draft list. Save changes to apply it.")
+        self.games_list.addItem(self._game_item(name))
+        self._games_edited()
+        self.show_notice(f"Added {name} to your Mining list.")
 
     def _connect_twitch(self):
         if self.data.get("logged_in"):
@@ -1139,6 +1280,9 @@ class MainWindow(QMainWindow):
                     dialog.setDetailedText(details)
             dialog.open()
             return
+        if name == "games":
+            self._games_finished(success)
+            return
         if name == "settings":
             self.settings_saving = False
             if success and self.settings_revision == self.saving_revision:
@@ -1228,7 +1372,7 @@ class MainWindow(QMainWindow):
             self._hide_to_tray()
             return
         if self.engine.isRunning():
-            if not self.closing and (self.settings_dirty or self.desktop_options_dirty):
+            if not self.closing and (self.settings_dirty or self.desktop_options_dirty or self._games_dirty()):
                 answer = QMessageBox.question(self, "Unsaved changes", "Close without saving your settings changes?", QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
                 if answer != QMessageBox.StandardButton.Discard:
                     self.force_quit = False
