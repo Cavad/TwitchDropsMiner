@@ -769,6 +769,11 @@ progress to an ignored drop while the miner intentionally targets another reward
   Its HTTP 204 response and a Watching label do not prove Twitch has credited progress.
   Keep fallback CurrentDrop queries and estimated-minute bumps on the existing minute
   cadence when changing playlist polling, including across restarts/channel events.
+- `watch_loop` is a critical task: an escaped exception closes the whole miner. Its
+  auxiliary CurrentDrop poll must treat every `RequestException` (GraphQL errors and
+  session/transport failures such as `SESSION_REQUEST` after network loss) and timeout
+  as "no reading" and continue; `ExitRequest` still propagates. Regression:
+  `test_failed_progress_requests_do_not_end_the_watch_loop`.
 - `WatchService.watch_loop` schedules progress queries with its monotonic deadline,
   independently of the GUI's remaining-seconds value. That value represents total reward
   time and does not count down on the server. Keep successful-watch, current-broadcast,

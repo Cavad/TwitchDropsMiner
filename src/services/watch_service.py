@@ -14,7 +14,7 @@ from time import monotonic
 from typing import TYPE_CHECKING, NoReturn
 
 from src.config import CALL, GQL_OPERATIONS, WATCH_INTERVAL
-from src.exceptions import GQLException
+from src.exceptions import RequestException
 from src.i18n import _
 from src.utils import task_wrapper
 
@@ -225,7 +225,10 @@ class WatchService:
                     drop_data: JsonType | None = context["data"]["currentUser"][
                         "dropCurrentSession"
                     ]
-                except (GQLException, TimeoutError):
+                except (RequestException, TimeoutError):
+                    # GraphQL errors and network/session failures (RequestException covers
+                    # GQLException and SessionError) only skip this auxiliary poll. The watch
+                    # loop is a critical task, so letting one escape would stop the miner.
                     drop_data = None
 
                 if not channel._watch_current(stream):

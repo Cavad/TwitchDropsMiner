@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.auth.imported_session import _TransientRequest
+from src.auth.session_bundle import SessionError
 from src.exceptions import GQLException
 from src.models.campaign import DropsCampaign
 from src.services.watch_service import WatchService
@@ -84,6 +86,11 @@ async def poll(twitch, on_request, *, until=30, returned_minutes=10, response="s
             raise GQLException("Test query failure")
         if response == "timeout":
             raise TimeoutError
+        if response == "transport":
+            # Network loss after the session's own safe-read retries.
+            raise _TransientRequest()
+        if response == "rejected":
+            raise SessionError("AUTH", reason="http_error", upstream_status=401)
         return {"data": {"currentUser": {"dropCurrentSession": {
             "dropID": "drop", "currentMinutesWatched": returned_minutes,
         } if response == "session" else None}}}
@@ -260,7 +267,7 @@ async def test_repeated_claim_does_not_suppress_fresh_poll(mining_state):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("response", ["null", "error", "timeout"])
+@pytest.mark.parametrize("response", ["null", "error", "timeout", "transport", "rejected"])
 @pytest.mark.parametrize("change", ["none", "observation", "unchanged", "replacement", "claim"])
 async def test_fallback_uses_only_unchanged_campaign_state(mining_state, response, change):
     twitch, channel, campaign = mining_state
@@ -286,3 +293,18 @@ async def test_fallback_uses_only_unchanged_campaign_state(mining_state, respons
     assert current[0].timed_drops["drop"].real_current_minutes == expected
     assert all(drop.extra_current_minutes == (1 if change == "none" else 0)
                for drop in current[0].drops)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", ["transport", "rejected"])
+async def test_failed_progress_requests_do_not_end_the_watch_loop(mining_state, response):
+    """A temporary Twitch or network outage must not stop mining (critical task exit)."""
+    twitch, channel, campaign = mining_state
+
+    async def observe(request):
+        await asyncio.sleep(0)
+
+    requests = await poll(twitch, observe, until=200, response=response)
+    # The loop kept polling on its minute cadence after every failed request.
+    assert requests == [20, 80, 140]
+    assert channel.send_watch.await_count >= 19

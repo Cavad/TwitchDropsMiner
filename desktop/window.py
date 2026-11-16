@@ -335,7 +335,7 @@ class MainWindow(QMainWindow):
         layout.addSpacing(16)
         self.engine_indicator = label("●  Starting engine", "muted")
         layout.addWidget(self.engine_indicator)
-        layout.addWidget(label("v2.5.0  /  Desktop r10", "muted"))
+        layout.addWidget(label("v2.5.0  /  Desktop r11", "muted"))
         return side
 
     def navigate(self, index):
@@ -519,7 +519,7 @@ class MainWindow(QMainWindow):
 
     def _copy_connection_diagnostics(self):
         if self.visible_diagnostic is not None:
-            data = {"desktop": "2.5.0 r10", **self.visible_diagnostic.to_dict()}
+            data = {"desktop": "2.5.0 r11", **self.visible_diagnostic.to_dict()}
             QGuiApplication.clipboard().setText(json.dumps(data, indent=2))
             self.show_notice("Copied connection diagnostics.")
 
