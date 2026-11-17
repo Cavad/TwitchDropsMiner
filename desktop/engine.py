@@ -21,6 +21,7 @@ from desktop.recap import OvernightRecap
 
 class MinerEngine(QThread):
     LOGIN_TIMEOUT_SECONDS = 300
+    SHUTDOWN_TIMEOUT_SECONDS = 20
     snapshot = Signal(dict)
     ready = Signal()
     notice = Signal(str)
@@ -167,7 +168,10 @@ class MinerEngine(QThread):
                 server_task.cancel()
                 await asyncio.gather(server_task, return_exceptions=True)
             try:
-                await self.client.shutdown()
+                # Bounded so a stuck browser or socket cleanup cannot keep the process alive.
+                await asyncio.wait_for(self.client.shutdown(), self.SHUTDOWN_TIMEOUT_SECONDS)
+            except TimeoutError:
+                logging.getLogger("TwitchDrops.desktop").warning("Miner cleanup did not finish in time")
             finally:
                 self.overnight_recap.flush()
                 settings.save()

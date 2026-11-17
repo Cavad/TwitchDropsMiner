@@ -8,6 +8,25 @@ import sys
 from logging.handlers import RotatingFileHandler
 
 
+ENGINE_STOP_WAIT_MS = 20_000
+
+
+def install_lifecycle(application, window) -> None:
+    """Quit only on an explicit request, and stop cleanly when Windows signs out."""
+    # Tray mode hides the window; Qt would otherwise quit when any dialog closes while
+    # hidden, and would never quit when the hidden window itself is closed.
+    application.setQuitOnLastWindowClosed(False)
+    application.commitDataRequest.connect(window.prepare_session_end)
+
+
+def stop_engine(engine, wait_ms: int = ENGINE_STOP_WAIT_MS) -> bool:
+    """Stop the engine thread; return False if it is still running after ``wait_ms``."""
+    if not engine.isRunning():
+        return True
+    engine.stop()
+    return bool(engine.wait(wait_ms))
+
+
 def main() -> int:
     # Windowed PyInstaller builds have no standard streams.
     if sys.stdout is None:
@@ -47,6 +66,7 @@ def main() -> int:
     logging.getLogger().setLevel(logging.INFO)
     engine = MinerEngine()
     window = MainWindow(engine)
+    install_lifecycle(application, window)
     window.show()
     if "--start-in-tray" in sys.argv:
         QTimer.singleShot(0, window._hide_to_tray)
@@ -57,9 +77,12 @@ def main() -> int:
         ctypes.windll.dwmapi.DwmSetWindowAttribute(int(window.winId()), 20, ctypes.byref(with_dark_caption), ctypes.sizeof(with_dark_caption))
     engine.start()
     result = application.exec()
-    if engine.isRunning():
-        engine.stop()
-        engine.wait()
+    if not stop_engine(engine):
+        # Never leave a windowless process behind: a stuck engine thread would keep it alive.
+        logging.getLogger("TwitchDrops.desktop").error("Engine thread did not stop; forcing exit")
+        lock.unlock()
+        logging.shutdown()
+        os._exit(result or 1)
     lock.unlock()
     return result
 

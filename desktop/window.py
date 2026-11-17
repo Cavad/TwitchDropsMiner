@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 from contextlib import suppress
 from datetime import datetime
@@ -21,6 +22,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -213,6 +215,8 @@ class MainWindow(QMainWindow):
         self.games_failed = False
         self.games_signature = None
         self.closing = False
+        self.session_ending = False
+        self.quit_requested = False
         self.export_path = None
         self.campaign_signature = None
         self.history_signature = None
@@ -1051,9 +1055,32 @@ class MainWindow(QMainWindow):
         if not self.closing and not self.system_tray.hide_window():
             self.show_notice("The system tray is unavailable. Keep this window open while mining.")
 
+    # Longest wait for the engine to shut down before the app exits anyway.
+    SHUTDOWN_TIMEOUT_MS = 75_000  # Engine cleanup is bounded to about 60s in total.
+
     def _request_quit(self):
         self.force_quit = True
         self.close()
+
+    def prepare_session_end(self, *_args):
+        """Windows sign-out or shutdown: stop cleanly instead of hiding to the tray or asking."""
+        self.session_ending = True
+        self._request_quit()
+
+    def _quit_application(self):
+        # Quit explicitly: Qt only quits on its own when the last *visible* window
+        # closes, so quitting from the tray (window hidden) used to leave the process
+        # running with no window or tray icon.
+        if not self.quit_requested:
+            self.quit_requested = True
+            self.system_tray.stop()
+            QTimer.singleShot(0, QApplication.quit)
+
+    def _shutdown_timeout(self):
+        if self.engine.isRunning():
+            logging.getLogger("TwitchDrops.desktop").warning("Engine did not stop within %ss; exiting", self.SHUTDOWN_TIMEOUT_MS // 1000)
+            self.hide()
+            self._quit_application()
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -1443,7 +1470,8 @@ class MainWindow(QMainWindow):
             self._hide_to_tray()
             return
         if self.engine.isRunning():
-            if not self.closing and (self.settings_dirty or self.desktop_options_dirty or self._games_dirty()):
+            if (not self.closing and not self.session_ending
+                    and (self.settings_dirty or self.desktop_options_dirty or self._games_dirty())):
                 answer = QMessageBox.question(self, "Unsaved changes", "Close without saving your settings changes?", QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
                 if answer != QMessageBox.StandardButton.Discard:
                     self.force_quit = False
@@ -1455,6 +1483,7 @@ class MainWindow(QMainWindow):
                 self.setEnabled(False)
                 self.status_line.setText("Closing the miner and its sign-in browser. Please wait…")
                 self.engine.stop()
+                QTimer.singleShot(self.SHUTDOWN_TIMEOUT_MS, self._shutdown_timeout)
         else:
-            self.system_tray.stop()
             event.accept()
+            self._quit_application()

@@ -7,6 +7,7 @@ import os
 import sys
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 from desktop.model import desktop_home
 from desktop.themes import DEFAULT_THEME, THEMES
@@ -50,7 +51,7 @@ class DesktopPreferences:
 
     def __init__(self, path: Path | None = None):
         self.path = path or desktop_home() / "desktop-preferences.json"
-        self.values = dict(self.DEFAULTS)
+        self.values: dict[str, Any] = dict(self.DEFAULTS)
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
@@ -58,7 +59,7 @@ class DesktopPreferences:
         except (OSError, ValueError):
             pass
 
-    def save(self, values: dict[str, bool | str]) -> None:
+    def save(self, values: dict[str, Any]) -> None:
         if set(values) != set(self.DEFAULTS) or not all(self._valid(key, value) for key, value in values.items()):
             raise ValueError("Invalid desktop preferences")
         previous = self.values

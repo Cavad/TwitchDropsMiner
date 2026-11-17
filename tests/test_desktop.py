@@ -989,3 +989,75 @@ def test_sign_in_controls_fit_the_minimum_window_with_windows_button_widths(wind
     assert widget.finish_login.isVisible() and widget.cancel_login.isVisible()
     connect_bottom = widget.connect_button.mapTo(widget, widget.connect_button.rect().bottomLeft()).y()
     assert widget.finish_login.mapTo(widget, widget.finish_login.rect().topLeft()).y() > connect_bottom
+
+
+def test_quit_from_tray_ends_the_application_once_the_engine_stops(window, monkeypatch):
+    """Regression: quitting while hidden in the tray left a windowless process running."""
+    widget, engine = window
+    quits = []
+    monkeypatch.setattr("desktop.window.QApplication.quit", lambda: quits.append(True))
+    # Run deferred (0 ms) callbacks at once; the 75 s watchdog never fires here.
+    monkeypatch.setattr("desktop.window.QTimer.singleShot", lambda ms, callback: callback() if ms == 0 else None)
+    widget.system_tray.stop = Mock()
+    running = [True]
+    engine.isRunning = lambda: running[0]
+    engine.stop = Mock()
+    widget.hide()  # In the tray.
+    widget._request_quit()
+    engine.stop.assert_called_once()
+    assert widget.closing and not quits
+    running[0] = False
+    engine.finished.emit()  # The engine thread ends.
+    assert quits == [True]
+    widget.system_tray.stop.assert_called()
+    widget.close()  # A repeated close never quits twice.
+    assert quits == [True]
+
+
+def test_session_end_stops_cleanly_even_in_tray_mode_with_unsaved_changes(window, monkeypatch):
+    widget, engine = window
+    asked = Mock()
+    monkeypatch.setattr("desktop.window.QMessageBox.question", asked)
+    engine.isRunning = lambda: True
+    engine.stop = Mock()
+    widget.preferences.values["close_to_tray"] = True
+    widget.system_tray.available = True
+    widget.settings_dirty = True
+    widget.prepare_session_end()
+    asked.assert_not_called()
+    engine.stop.assert_called_once()
+    assert widget.closing
+    engine.isRunning = lambda: False
+
+
+def test_stuck_engine_shutdown_still_quits(window, monkeypatch):
+    widget, engine = window
+    quits = []
+    monkeypatch.setattr("desktop.window.QApplication.quit", lambda: quits.append(True))
+    monkeypatch.setattr("desktop.window.QTimer.singleShot", lambda _ms, callback: None)
+    engine.isRunning = lambda: True
+    engine.stop = Mock()
+    widget._request_quit()
+    monkeypatch.setattr("desktop.window.QTimer.singleShot", lambda _ms, callback: callback())
+    widget._shutdown_timeout()
+    assert quits == [True]
+    engine.isRunning = lambda: False
+
+
+def test_application_lifecycle_and_bounded_engine_stop(app):
+    import desktop_main
+
+    window = SimpleNamespace(prepare_session_end=Mock())
+    app.setQuitOnLastWindowClosed(True)
+    desktop_main.install_lifecycle(app, window)
+    assert not app.quitOnLastWindowClosed()
+    app.commitDataRequest.disconnect(window.prepare_session_end)
+    app.setQuitOnLastWindowClosed(True)
+
+    stopped = SimpleNamespace(isRunning=lambda: False, stop=Mock(), wait=Mock())
+    assert desktop_main.stop_engine(stopped)
+    stopped.stop.assert_not_called()
+    stuck = SimpleNamespace(isRunning=lambda: True, stop=Mock(), wait=Mock(return_value=False))
+    assert not desktop_main.stop_engine(stuck, 5)
+    stuck.stop.assert_called_once()
+    stuck.wait.assert_called_once_with(5)
