@@ -420,7 +420,7 @@ def test_long_login_error_and_waiting_hint_do_not_overlap_controls(window, app):
     assert button_bottom < hint_top
     assert widget.hero_copy.height() >= widget.hero_copy.heightForWidth(widget.hero_copy.width())
     assert widget.overview_scroll.verticalScrollBar().maximum() > 0
-    assert widget.overview_scroll.widget().width() <= widget.overview_scroll.viewport().width()
+    assert widget.overview_scroll.widget().width() <= widget.overview_scroll.viewport().width(), overview_widths(widget)
 
 
 def test_new_login_clears_previous_error_and_cancel_is_not_reentrant(window):
@@ -922,7 +922,7 @@ def test_buttons_keep_their_size_when_focused_and_connect_width_is_stable(window
         item.style().polish(item)
         assert item.sizeHint() == plain, item.text()
     widths = set()
-    for text in widget.CONNECT_TEXTS + ("Waiting for Twitch · 4:59",):
+    for text in widget.CONNECT_TEXTS:
         widget.connect_button.setText(text)
         QApplication.processEvents()
         assert widget.connect_button.sizeHint().width() <= widget.connect_button.minimumWidth(), text
@@ -930,6 +930,17 @@ def test_buttons_keep_their_size_when_focused_and_connect_width_is_stable(window
     assert len(widths) == 1
     down, up = widget.control_arrows.paths(widget.theme.color("muted"))
     assert Path(down).is_file() and Path(up).is_file()
+
+
+def overview_widths(widget):
+    """The widest visible overview widgets, to explain any sideways overflow."""
+    from PySide6.QtWidgets import QWidget
+
+    content = widget.overview_scroll.widget()
+    rows = sorted(((child.minimumSizeHint().width(), child.minimumWidth(), type(child).__name__,
+                    child.objectName(), str(getattr(child, "text", lambda: "")())[:40])
+                   for child in content.findChildren(QWidget) if child.isVisible()), reverse=True)
+    return f"content min {content.minimumSizeHint().width()}; widest: {rows[:12]}"
 
 
 def test_overview_artwork_hides_whenever_it_would_overflow(window, app):
@@ -943,9 +954,20 @@ def test_overview_artwork_hides_whenever_it_would_overflow(window, app):
     for _ in range(10):  # Let the deferred check and scroll-area relayout settle.
         app.processEvents()
     assert not widget.overview_scroll.artwork.isVisible()
-    assert widget.overview_scroll.widget().width() <= widget.overview_scroll.viewport().width()
+    assert widget.overview_scroll.widget().width() <= widget.overview_scroll.viewport().width(), overview_widths(widget)
     widget.resize(1600, 900)
     for _ in range(10):  # Let the deferred check and scroll-area relayout settle.
         app.processEvents()
     assert widget.overview_scroll.artwork.isVisible()
-    assert widget.overview_scroll.widget().width() <= widget.overview_scroll.viewport().width()
+    assert widget.overview_scroll.widget().width() <= widget.overview_scroll.viewport().width(), overview_widths(widget)
+
+
+def test_sign_in_timer_shows_in_the_hint_and_keeps_the_button_text(window, app):
+    widget, engine = window
+    widget.connect_button.click()
+    engine.login_phase.emit("login")
+    widget.login_clock.restart()
+    widget._login_tick()
+    assert widget.connect_button.text() == "Waiting for Twitch…"
+    assert widget.login_hint.text().endswith("0:00 elapsed")
+    assert widget.login_hint.text().startswith("Sign in and complete Twitch verification")

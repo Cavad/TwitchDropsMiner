@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
         self.login_busy = False
         self.login_cancelling = False
         self.login_stage = ""
+        self.login_hint_base = ""
         self.login_clock = QElapsedTimer()
         self.login_timer = QTimer(self)
         self.login_timer.setInterval(1000)
@@ -996,7 +997,7 @@ class MainWindow(QMainWindow):
         return header
 
     # Every text the Connect button shows; its width fits the widest so it never jumps.
-    CONNECT_TEXTS = ("Connect Twitch  →", "Opening sign-in…", "Waiting for Twitch · 88:88", "Waiting for Twitch…",
+    CONNECT_TEXTS = ("Connect Twitch  →", "Opening sign-in…", "Waiting for Twitch…",
                      "Checking session…", "Finishing sign-in…", "Closing sign-in…", "Twitch connected")
 
     def _fit_connect_button(self):
@@ -1291,9 +1292,11 @@ class MainWindow(QMainWindow):
     def _login_tick(self):
         if self.login_busy and not self.login_cancelling and self.login_stage in ("login", "chromium_login", "firefox_login"):
             seconds = max(0, self.login_clock.elapsed() // 1000)
-            self.connect_button.setText(f"Waiting for Twitch · {seconds // 60}:{seconds % 60:02}")
-            if seconds >= 60:
-                self.login_hint.setText("Complete Twitch sign-in, then select Finish sign-in here. Campaign data loads automatically. If verification keeps spinning, cancel and try another browser.")
+            # The timer lives in the wrapping hint, so the button keeps one short, steady text.
+            self.connect_button.setText("Waiting for Twitch…")
+            base = ("Complete Twitch sign-in, then select Finish sign-in here. Campaign data loads automatically. If verification keeps spinning, cancel and try another browser."
+                    if seconds >= 60 else self.login_hint_base)
+            self.login_hint.setText(f"{base}  ·  {seconds // 60}:{seconds % 60:02} elapsed")
 
     def _login_phase(self, phase):
         if not self.login_busy or self.login_cancelling:
@@ -1308,7 +1311,8 @@ class MainWindow(QMainWindow):
             "sending": "Verifying the account and loading campaign access automatically…",
             "success": "Twitch connected. Loading your campaigns…",
         }
-        self.login_hint.setText(messages.get(phase, "Completing secure Twitch sign-in…"))
+        self.login_hint_base = messages.get(phase, "Completing secure Twitch sign-in…")
+        self.login_hint.setText(self.login_hint_base)
         manual = phase in ("login", "chromium_login", "firefox_login")
         self.finish_login.setVisible(manual)
         self.finish_login.setEnabled(manual)
