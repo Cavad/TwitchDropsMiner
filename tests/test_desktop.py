@@ -872,7 +872,8 @@ def test_theme_picker_applies_immediately_and_saves_only_the_theme(window, tmp_p
     widget.desktop_options["notifications"].setChecked(False)
     widget.theme_picker.setCurrentIndex(widget.theme_picker.findData("office"))
     assert widget.theme.key == "office"
-    assert widget.styleSheet() == THEMES["office"].stylesheet()
+    assert widget.styleSheet().startswith(THEMES["office"].stylesheet())
+    assert "QComboBox::down-arrow" in widget.styleSheet()
     assert all(art.theme.key == "office" for art in widget.theme_art)
     assert len(widget.theme_art) == 6  # Overview plus five page headers.
     assert widget.theme_description.text() == THEMES["office"].description
@@ -897,3 +898,35 @@ def test_theme_save_failure_restores_the_previous_theme(window, monkeypatch):
     assert widget.theme.key == before
     assert widget.theme_picker.currentData() == before
     assert "Could not save the theme" in widget.banner_text.text()
+
+
+@pytest.mark.parametrize("key", ["midnight", "neon_hollow", "office"])
+def test_buttons_keep_their_size_when_focused_and_connect_width_is_stable(window, key):
+    from pathlib import Path
+
+    from PySide6.QtCore import Qt
+
+    widget, _ = window
+    widget.apply_theme(key)
+    widget.show()
+    widget.finish_login.show()
+    widget.cancel_login.show()
+    for item in [widget.connect_button, widget.cancel_login, widget.navigation[0]]:
+        item.setEnabled(True)
+        item.clearFocus()
+        item.style().unpolish(item)
+        item.style().polish(item)
+        plain = item.sizeHint()
+        item.setFocus(Qt.FocusReason.TabFocusReason)
+        item.style().unpolish(item)
+        item.style().polish(item)
+        assert item.sizeHint() == plain, item.text()
+    widths = set()
+    for text in widget.CONNECT_TEXTS + ("Waiting for Twitch · 4:59",):
+        widget.connect_button.setText(text)
+        QApplication.processEvents()
+        assert widget.connect_button.sizeHint().width() <= widget.connect_button.minimumWidth(), text
+        widths.add(widget.connect_button.width())
+    assert len(widths) == 1
+    down, up = widget.control_arrows.paths(widget.theme.color("muted"))
+    assert Path(down).is_file() and Path(up).is_file()

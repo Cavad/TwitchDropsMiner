@@ -29,9 +29,26 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def test_default_theme_keeps_the_original_look_exactly():
+def test_default_theme_keeps_the_original_look_apart_from_focus_sizing():
     assert DEFAULT_THEME == "midnight"
-    assert hashlib.sha256(THEMES["midnight"].stylesheet().encode()).hexdigest() == ORIGINAL_STYLESHEET
+    sheet = THEMES["midnight"].stylesheet()
+    # The only intended change: focus rings keep each button's size (they used to grow
+    # it by 2px, which shifted the focused button), and nav/link buttons get focus styles.
+    focus = "QPushButton:focus { border: 2px solid #c3a6ff; padding: 9px 16px; }"
+    assert focus in sheet
+    original = "\n".join(
+        line for line in sheet.replace(focus, "QPushButton:focus { border: 2px solid #c3a6ff; }").split("\n")
+        if not line.startswith(("QPushButton[role='nav']:focus", "QPushButton[role='link']:focus"))
+    )
+    assert hashlib.sha256(original.encode()).hexdigest() == ORIGINAL_STYLESHEET
+
+
+def test_drop_down_and_spin_arrows_are_themed_only_when_images_are_given():
+    plain = THEMES["office"].stylesheet()
+    assert "QComboBox::drop-down" not in plain
+    sheet = THEMES["office"].stylesheet(("C:\\tmp\\down.png", "C:\\tmp\\up.png"))
+    assert sheet.startswith(plain)
+    assert "url(C:/tmp/down.png)" in sheet and "url(C:/tmp/up.png)" in sheet
 
 
 def test_six_complete_themes_build_valid_stylesheets():

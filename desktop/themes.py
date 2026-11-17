@@ -28,7 +28,8 @@ class Theme:
     def color(self, token: str) -> str:
         return self.colors[token]
 
-    def stylesheet(self) -> str:
+    def stylesheet(self, arrows: tuple[str, str] | None = None) -> str:
+        """Return the stylesheet; ``arrows`` are (down, up) image paths for drop-down and spin controls."""
         c = self.colors
         small = max(2, round(self.radius * 8 / 14))
         hero = self.radius + 4
@@ -36,7 +37,11 @@ class Theme:
                   "banner_radius": max(2, round(self.radius * 10 / 14)), "title_extra": f" letter-spacing: {self.title_spacing};" if self.title_spacing != "0px" else "",
                   "bar": max(2, round(self.radius * 4 / 14)), "scroll": max(2, round(self.radius * 3 / 14)),
                   "check": max(2, round(self.radius * 5 / 14))}
-        return _TEMPLATE.format(**tokens)
+        sheet = _TEMPLATE.format(**tokens)
+        if arrows is not None:
+            down, up = (path.replace("\\", "/") for path in arrows)
+            sheet += _CONTROLS.format(down=down, up=up, hover=c["button_hover"])
+        return sheet
 
 
 _TEMPLATE = """
@@ -55,7 +60,7 @@ QFrame#banner {{ background: {banner}; border: 1px solid {hero_border}; border-r
 QPushButton {{ background: {button}; border: 1px solid {button_border}; border-radius: {small}px; padding: 10px 17px; font-weight: 600; min-height: 20px; }}
 QPushButton:hover {{ background: {button_hover}; border-color: {button_hover_border}; }}
 QPushButton:pressed {{ background: {button_pressed}; }}
-QPushButton:focus {{ border: 2px solid {focus}; }}
+QPushButton:focus {{ border: 2px solid {focus}; padding: 9px 16px; }}
 QPushButton:disabled {{ color: {disabled_text}; background: {disabled_bg}; border-color: {disabled_border}; }}
 QPushButton[role='primary'] {{ background: {accent}; color: {accent_text}; border-color: {accent_border}; font-weight: 700; }}
 QPushButton[role='primary']:hover {{ background: {accent_hover}; }}
@@ -63,7 +68,9 @@ QPushButton[role='primary']:disabled {{ background: {primary_disabled_bg}; color
 QPushButton[role='nav'] {{ background: transparent; border: 1px solid transparent; text-align: left; color: {nav_text}; padding: 12px 18px; }}
 QPushButton[role='nav']:checked {{ background: {nav_checked_bg}; color: {nav_checked_text}; border-color: {nav_checked_border}; }}
 QPushButton[role='nav']:hover {{ background: {nav_hover_bg}; color: {nav_hover_text}; }}
+QPushButton[role='nav']:focus {{ border: 2px solid {focus}; padding: 11px 17px; }}
 QPushButton[role='link'] {{ background: transparent; border: none; color: {link}; text-align: left; padding: 6px 0; }}
+QPushButton[role='link']:focus {{ border: none; padding: 6px 0; text-decoration: underline; }}
 QPushButton[role='danger'] {{ color: {danger}; }}
 QLineEdit,QComboBox,QSpinBox,QListWidget,QPlainTextEdit,QTableWidget {{ background: {input_bg}; border: 1px solid {input_border}; border-radius: {small}px; padding: 10px; selection-background-color: {selection}; }}
 QLineEdit:focus,QComboBox:focus,QSpinBox:focus,QListWidget:focus {{ border-color: {accent}; }}
@@ -82,6 +89,21 @@ QTableWidget::item {{ padding: 10px; }}
 QHeaderView::section {{ background: {header_bg}; color: {header_text}; padding: 12px; border: none; border-bottom: 1px solid {input_border}; font-weight: 600; }}
 QListWidget::item {{ padding: 10px; border-bottom: 1px solid {list_divider}; }}
 QToolTip {{ background: {tooltip_bg}; color: {tooltip_text}; border: 1px solid {selection}; padding: 7px; }}
+"""
+
+# Flat arrow areas for drop-downs and number fields. Without these, Windows draws its
+# own separator strip and arrows, which clash with the themed field and look skewed.
+_CONTROLS = """
+QComboBox {{ padding-right: 30px; }}
+QComboBox::drop-down {{ border: none; width: 30px; background: transparent; subcontrol-origin: padding; subcontrol-position: center right; }}
+QComboBox::down-arrow {{ image: url({down}); width: 10px; height: 6px; }}
+QSpinBox {{ padding-right: 28px; }}
+QSpinBox::up-button, QSpinBox::down-button {{ border: none; width: 26px; background: transparent; subcontrol-origin: border; }}
+QSpinBox::up-button {{ subcontrol-position: top right; }}
+QSpinBox::down-button {{ subcontrol-position: bottom right; }}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background: {hover}; }}
+QSpinBox::up-arrow {{ image: url({up}); width: 9px; height: 5px; }}
+QSpinBox::down-arrow {{ image: url({down}); width: 9px; height: 5px; }}
 """
 
 # Every palette defines all tokens; tests check this against the template.

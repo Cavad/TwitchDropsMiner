@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QElapsedTimer, QEvent, QRectF, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, QEvent, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
@@ -16,6 +17,7 @@ from PySide6.QtGui import (
     QIcon,
     QPainter,
     QPixmap,
+    QPolygonF,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -94,6 +96,33 @@ def clear_layout(layout):
 
 
 
+class ControlArrows:
+    """Arrow images for themed drop-downs and number fields, kept for the app's lifetime."""
+
+    def __init__(self):
+        self._directory = tempfile.TemporaryDirectory(prefix="tdm-theme-")
+        self._cache: dict[str, tuple[str, str]] = {}
+
+    def paths(self, color: str) -> tuple[str, str]:
+        if color not in self._cache:
+            self._cache[color] = (self._draw(color, up=False), self._draw(color, up=True))
+        return self._cache[color]
+
+    def _draw(self, color: str, *, up: bool) -> str:
+        pixmap = QPixmap(40, 24)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        points = ((4, 20), (36, 20), (20, 4)) if up else ((4, 4), (36, 4), (20, 20))
+        painter.drawPolygon(QPolygonF([QPointF(x, y) for x, y in points]))
+        painter.end()
+        path = Path(self._directory.name) / f"{'up' if up else 'down'}-{color.lstrip('#')}.png"
+        pixmap.save(str(path))
+        return path.as_posix()
+
+
 class OverviewScrollArea(QScrollArea):
     def __init__(self, artwork):
         super().__init__()
@@ -163,7 +192,8 @@ class MainWindow(QMainWindow):
         self.theme = resolve_theme(self.preferences.values.get("theme"))
         self.theme_art: list[ThemeArt] = []
         self.engine_state = "starting"
-        self.setStyleSheet(self.theme.stylesheet())
+        self.control_arrows = ControlArrows()
+        self.setStyleSheet(self._stylesheet())
         root = QWidget()
         self.setCentralWidget(root)
         layout = QHBoxLayout(root)
@@ -213,6 +243,7 @@ class MainWindow(QMainWindow):
         engine.finished.connect(self._engine_stopped)
         if hasattr(engine, "connection_changed"):
             engine.connection_changed.connect(self._render_connection)
+        self._fit_connect_button()
         self.system_tray = SystemTrayController(self, application_icon())
         self.tray_button.setEnabled(self.system_tray.available)
         self.refresh_button.setEnabled(False)
@@ -314,7 +345,6 @@ class MainWindow(QMainWindow):
         details.addLayout(browser_row)
         actions = QHBoxLayout()
         self.connect_button = button("Connect Twitch  →", self._connect_twitch, "primary", "connectTwitchButton")
-        self.connect_button.setMinimumWidth(190)
         self.connect_button.setEnabled(False)
         self.cancel_login = button("Cancel", self._cancel_login, name="cancelLoginButton")
         self.cancel_login.hide()
@@ -933,9 +963,25 @@ class MainWindow(QMainWindow):
         header.addWidget(self._art(page, 290, 104), 0, Qt.AlignmentFlag.AlignVCenter)
         return header
 
+    # Every text the Connect button shows; its width fits the widest so it never jumps.
+    CONNECT_TEXTS = ("Connect Twitch  →", "Opening sign-in…", "Waiting for Twitch · 88:88", "Waiting for Twitch…",
+                     "Checking session…", "Finishing sign-in…", "Closing sign-in…", "Twitch connected")
+
+    def _fit_connect_button(self):
+        self.connect_button.ensurePolished()
+        metrics = self.connect_button.fontMetrics()
+        widest = max(metrics.horizontalAdvance(text) for text in self.CONNECT_TEXTS)
+        # Text plus the stylesheet's horizontal padding (17px) and border on each side.
+        self.connect_button.setMinimumWidth(max(190, widest + 2 * (17 + 2) + 8))
+
+    def _stylesheet(self):
+        return self.theme.stylesheet(self.control_arrows.paths(self.theme.color("muted")))
+
     def apply_theme(self, key):
         self.theme = resolve_theme(key)
-        self.setStyleSheet(self.theme.stylesheet())
+        self.setStyleSheet(self._stylesheet())
+        if hasattr(self, "connect_button"):
+            self._fit_connect_button()
         for artwork in self.theme_art:
             artwork.set_theme(self.theme)
         self._set_engine_state(self.engine_state)
