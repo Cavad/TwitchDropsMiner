@@ -860,3 +860,40 @@ def test_campaign_troubleshooting_shows_first_blocker_immediately(window):
     assert dialog.informativeText() == "First reward: Link your account."
     assert "Second reward" in dialog.detailedText()
     dialog.close()
+
+
+def test_theme_picker_applies_immediately_and_saves_only_the_theme(window, tmp_path):
+    from desktop.preferences import DesktopPreferences
+    from desktop.themes import THEMES
+
+    widget, _ = window
+    widget.preferences = DesktopPreferences(tmp_path / "desktop.json")
+    # An unsaved desktop option must not be saved along with the theme.
+    widget.desktop_options["notifications"].setChecked(False)
+    widget.theme_picker.setCurrentIndex(widget.theme_picker.findData("office"))
+    assert widget.theme.key == "office"
+    assert widget.styleSheet() == THEMES["office"].stylesheet()
+    assert all(art.theme.key == "office" for art in widget.theme_art)
+    assert len(widget.theme_art) == 6  # Overview plus five page headers.
+    assert widget.theme_description.text() == THEMES["office"].description
+    saved = DesktopPreferences(tmp_path / "desktop.json").values
+    assert saved["theme"] == "office" and saved["notifications"] is True
+    widget._ready()
+    assert THEMES["office"].colors["success"] in widget.engine_indicator.styleSheet()
+    # Saving desktop options later keeps the chosen theme.
+    widget._save_desktop_options()
+    assert DesktopPreferences(tmp_path / "desktop.json").values["theme"] == "office"
+
+
+def test_theme_save_failure_restores_the_previous_theme(window, monkeypatch):
+    widget, _ = window
+
+    def fail(_values):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(widget.preferences, "save", fail)
+    before = widget.theme.key
+    widget.theme_picker.setCurrentIndex(widget.theme_picker.findData("neon_hollow"))
+    assert widget.theme.key == before
+    assert widget.theme_picker.currentData() == before
+    assert "Could not save the theme" in widget.banner_text.text()

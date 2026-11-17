@@ -14,9 +14,7 @@ from PySide6.QtGui import (
     QFont,
     QGuiApplication,
     QIcon,
-    QLinearGradient,
     QPainter,
-    QPen,
     QPixmap,
 )
 from PySide6.QtWidgets import (
@@ -38,7 +36,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSpinBox,
     QStackedWidget,
     QTableWidget,
@@ -57,52 +54,9 @@ from desktop.model import (
 from desktop.planning import MiningPlanner
 from desktop.preferences import DesktopPreferences
 from desktop.system_tray import SystemTrayController
-
-
-THEME = """
-QWidget { background: #101116; color: #ececf5; font-family: 'Segoe UI'; font-size: 14px; }
-QMainWindow { background: #101116; }
-QLabel { background: transparent; }
-QLabel[role='muted'] { color: #9294a7; }
-QLabel[role='eyebrow'] { color: #85889d; font-size: 11px; font-weight: 700; letter-spacing: 2px; }
-QLabel[role='title'] { color: #fafaff; font-size: 32px; font-weight: 700; }
-QLabel[role='section'] { color: #f1f0fa; font-size: 18px; font-weight: 600; }
-QLabel[role='metric'] { color: #f5f4ff; font-size: 32px; font-weight: 600; }
-QFrame#sidebar { background: #14151c; border-right: 1px solid #252631; }
-QFrame#card { background: #1a1b24; border: 1px solid #2b2c3a; border-radius: 14px; }
-QFrame#hero { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #252039,stop:1 #1a1b29); border: 1px solid #493665; border-radius: 18px; }
-QFrame#banner { background: #282039; border: 1px solid #493665; border-radius: 10px; }
-QPushButton { background: #252631; border: 1px solid #363846; border-radius: 8px; padding: 10px 17px; font-weight: 600; min-height: 20px; }
-QPushButton:hover { background: #303140; border-color: #606274; }
-QPushButton:pressed { background: #1e1f29; }
-QPushButton:focus { border: 2px solid #c3a6ff; }
-QPushButton:disabled { color: #6c6e80; background: #20212b; border-color: #2d2e3a; }
-QPushButton[role='primary'] { background: #a178f3; color: #120c20; border-color: #aa85f8; font-weight: 700; }
-QPushButton[role='primary']:hover { background: #b18afc; }
-QPushButton[role='primary']:disabled { background: #4d3d69; color: #a18bbd; border-color: #574370; }
-QPushButton[role='nav'] { background: transparent; border: 1px solid transparent; text-align: left; color: #9ea0b2; padding: 12px 18px; }
-QPushButton[role='nav']:checked { background: #2b233e; color: #d3b9ff; border-color: #443258; }
-QPushButton[role='nav']:hover { background: #22232e; color: #f3edff; }
-QPushButton[role='link'] { background: transparent; border: none; color: #c3a1ff; text-align: left; padding: 6px 0; }
-QPushButton[role='danger'] { color: #f9a6b1; }
-QLineEdit,QComboBox,QSpinBox,QListWidget,QPlainTextEdit,QTableWidget { background: #14151d; border: 1px solid #353744; border-radius: 8px; padding: 10px; selection-background-color: #604790; }
-QLineEdit:focus,QComboBox:focus,QSpinBox:focus,QListWidget:focus { border-color: #a178f3; }
-QComboBox QAbstractItemView { background: #22232e; color: #f0eafa; selection-background-color: #604790; }
-QCheckBox { spacing: 10px; background: transparent; padding: 7px 0; }
-QCheckBox::indicator { width: 18px; height: 18px; border-radius: 5px; background: #14151d; border: 1px solid #55576b; }
-QCheckBox::indicator:checked { background: #a178f3; border: 4px solid #d4baff; }
-QProgressBar { background: #30303e; border: none; border-radius: 4px; height: 8px; text-align: center; }
-QProgressBar::chunk { background: #a178f3; border-radius: 4px; }
-QScrollArea { border: none; background: transparent; }
-QScrollBar:vertical { width: 8px; background: transparent; margin: 2px; }
-QScrollBar::handle:vertical { background: #414352; border-radius: 3px; min-height: 30px; }
-QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical { height: 0px; }
-QTableWidget { gridline-color: #2b2c38; }
-QTableWidget::item { padding: 10px; }
-QHeaderView::section { background: #1d1e28; color: #989aaf; padding: 12px; border: none; border-bottom: 1px solid #353744; font-weight: 600; }
-QListWidget::item { padding: 10px; border-bottom: 1px solid #292a36; }
-QToolTip { background: #2b2539; color: #f1eafa; border: 1px solid #604790; padding: 7px; }
-"""
+from desktop.theme_art import ThemeArt
+from desktop.themes import THEMES
+from desktop.themes import theme as resolve_theme
 
 
 def label(text: str, role: str = "", wrap: bool = False) -> QLabel:
@@ -138,46 +92,6 @@ def clear_layout(layout):
             item.widget().deleteLater()
 
 
-class LootArt(QWidget):
-    """Original vector artwork drawn at the native display scale."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumSize(190, 190)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        self.setFixedWidth(220)
-        self.setAccessibleName("Decorative reward chest")
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.translate(self.width() / 2, self.height() / 2)
-        p.setPen(QPen(QColor("#49355f"), 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawEllipse(QRectF(-88, -88, 176, 176))
-        p.drawEllipse(QRectF(-66, -66, 132, 132))
-        p.setPen(Qt.PenStyle.NoPen)
-        for x, y, radius in ((-83, -28, 4), (72, 48, 4), (33, -81, 3)):
-            p.setBrush(QColor("#c5a0ff"))
-            p.drawEllipse(QRectF(x-radius, y-radius, radius*2, radius*2))
-        p.save()
-        p.rotate(-10)
-        gradient = QLinearGradient(-50, -50, 55, 60)
-        gradient.setColorAt(0, QColor("#bd98ff"))
-        gradient.setColorAt(1, QColor("#7447b8"))
-        p.setBrush(gradient)
-        p.drawRoundedRect(QRectF(-54, -39, 108, 91), 15, 15)
-        p.setBrush(QColor("#ddc4ff"))
-        p.drawRoundedRect(QRectF(-60, -45, 120, 33), 10, 10)
-        p.setBrush(QColor("#4b2e76"))
-        p.drawRoundedRect(QRectF(-12, -23, 24, 45), 7, 7)
-        p.setBrush(QColor("#f4e7ff"))
-        p.drawEllipse(QRectF(-4, -9, 8, 8))
-        p.restore()
-        p.setPen(QPen(QColor("#d6baff"), 2))
-        for x, y in ((-61, 63), (71, -55)):
-            p.drawLine(x-5, y, x+5, y)
-            p.drawLine(x, y-5, x, y+5)
 
 
 class OverviewScrollArea(QScrollArea):
@@ -246,7 +160,10 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(application_icon())
         self.resize(1280, 860)
         self.setMinimumSize(1000, 720)
-        self.setStyleSheet(THEME)
+        self.theme = resolve_theme(self.preferences.values.get("theme"))
+        self.theme_art: list[ThemeArt] = []
+        self.engine_state = "starting"
+        self.setStyleSheet(self.theme.stylesheet())
         root = QWidget()
         self.setCentralWidget(root)
         layout = QHBoxLayout(root)
@@ -335,7 +252,7 @@ class MainWindow(QMainWindow):
         layout.addSpacing(16)
         self.engine_indicator = label("●  Starting engine", "muted")
         layout.addWidget(self.engine_indicator)
-        layout.addWidget(label("v2.5.0  /  Desktop r11", "muted"))
+        layout.addWidget(label("v2.5.0  /  Desktop r12", "muted"))
         return side
 
     def navigate(self, index):
@@ -412,8 +329,8 @@ class MainWindow(QMainWindow):
         self.login_hint.setStyleSheet("font-size: 12px;")
         details.addWidget(self.login_hint)
         row.addLayout(details, 1)
-        artwork = LootArt()
-        row.addWidget(artwork)
+        artwork = self._art("overview", 220, 220)
+        row.addWidget(artwork, 0, Qt.AlignmentFlag.AlignVCenter)
         hero_layout.addLayout(row)
         layout.addWidget(hero)
         stats = QHBoxLayout()
@@ -468,8 +385,10 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
-        layout.addWidget(label("A smarter reward queue.", "title", True))
-        layout.addWidget(label("Your selected game priorities come first. Additional eligible games follow campaign deadlines; the miner switches channels automatically.", "muted", True))
+        layout.addLayout(self._page_header(
+            "queue", "A smarter reward queue.",
+            "Your selected game priorities come first. Additional eligible games follow campaign deadlines; the miner switches channels automatically.",
+        ))
         layout.addWidget(label("Times are a sequential planning budget with continuous eligible watching. Pauses, schedules, offline streams and Twitch delays can extend them; they are not a guarantee.", "muted", True))
         self.queue_summary = label("Connect Twitch to load the eligible queue.", "muted", True)
         layout.addWidget(self.queue_summary)
@@ -519,7 +438,7 @@ class MainWindow(QMainWindow):
 
     def _copy_connection_diagnostics(self):
         if self.visible_diagnostic is not None:
-            data = {"desktop": "2.5.0 r11", **self.visible_diagnostic.to_dict()}
+            data = {"desktop": "2.5.0 r12", **self.visible_diagnostic.to_dict()}
             QGuiApplication.clipboard().setText(json.dumps(data, indent=2))
             self.show_notice("Copied connection diagnostics.")
 
@@ -578,8 +497,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
-        layout.addWidget(label("Find your next reward.", "title"))
-        layout.addWidget(label("Campaigns and progress, straight from your Twitch inventory.", "muted"))
+        layout.addLayout(self._page_header("campaigns", "Find your next reward.", "Campaigns and progress, straight from your Twitch inventory."))
         filters = QHBoxLayout()
         self.campaign_search = QLineEdit()
         self.campaign_search.setPlaceholderText("Search games or campaigns…")
@@ -661,13 +579,12 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
-        heading = QHBoxLayout()
-        heading.addWidget(label("A collection worth keeping.", "title"), 1)
         self.export_button = button("Export CSV", self._export_history, name="exportHistoryButton")
         self.export_button.setEnabled(False)
-        heading.addWidget(self.export_button)
-        layout.addLayout(heading)
-        layout.addWidget(label("Your locally recorded claims. Recent 500 shown; CSV includes the full history.", "muted", True))
+        layout.addLayout(self._page_header(
+            "history", "A collection worth keeping.",
+            "Your locally recorded claims. Recent 500 shown; CSV includes the full history.", self.export_button,
+        ))
         self.history_empty = label("No rewards claimed yet. Your first one will appear here.", "muted", True)
         layout.addWidget(self.history_empty)
         self.history_table = QTableWidget(0, 3)
@@ -686,8 +603,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
-        layout.addWidget(label("A window into your miner.", "title"))
-        layout.addWidget(label("Live activity from the engine. Keep this PC awake while collecting.", "muted"))
+        layout.addLayout(self._page_header("activity", "A window into your miner.", "Live activity from the engine. Keep this PC awake while collecting."))
         recap, recap_layout = card()
         recap_layout.addWidget(label("Overnight recap", "section"))
         self.recap_night = QComboBox()
@@ -756,8 +672,7 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(16)
-        outer.addWidget(label("Make it yours.", "title"))
-        outer.addWidget(label("Control what you collect and which games come first.", "muted"))
+        outer.addLayout(self._page_header("settings", "Make it yours.", "Control what you collect, which games come first and how the app looks."))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         container = QWidget()
@@ -836,6 +751,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(policy)
         desktop, desktop_layout = card()
         desktop_layout.addWidget(label("Desktop behavior", "section"))
+        theme_row = QHBoxLayout()
+        theme_row.addWidget(label("Theme", "muted"))
+        self.theme_picker = QComboBox()
+        self.theme_picker.setAccessibleName("Theme")
+        for item in THEMES.values():
+            self.theme_picker.addItem(item.name, item.key)
+        self.theme_picker.setCurrentIndex(self.theme_picker.findData(self.theme.key))
+        self.theme_picker.currentIndexChanged.connect(self._theme_selected)
+        theme_row.addWidget(self.theme_picker, 1)
+        desktop_layout.addLayout(theme_row)
+        self.theme_description = label(self.theme.description, "muted", True)
+        desktop_layout.addWidget(self.theme_description)
         self.desktop_options = {}
         for key, text in (
             ("automatic_queue", "Prioritize campaigns nearing expiry"),
@@ -881,7 +808,7 @@ class MainWindow(QMainWindow):
         self.connect_button.setEnabled(True)
         self.export_button.setEnabled(True)
         self.engine_indicator.setText("●  Engine online")
-        self.engine_indicator.setStyleSheet("color: #83cfb3;")
+        self._set_engine_state("online")
         self.status_line.setText("Your miner is ready. Connect Twitch to get started.")
         if hasattr(self.engine, "preferences"):
             self.engine.submit("desktop_policy", self.preferences.values["automatic_queue"])
@@ -968,7 +895,8 @@ class MainWindow(QMainWindow):
         self.desktop_options_status.setText("You have unsaved desktop options.")
 
     def _save_desktop_options(self):
-        values = {key: checkbox.isChecked() for key, checkbox in self.desktop_options.items()}
+        values: dict[str, bool | str] = {key: checkbox.isChecked() for key, checkbox in self.desktop_options.items()}
+        values["theme"] = self.preferences.values["theme"]
         try:
             self.preferences.save(values)
         except (OSError, ValueError):
@@ -978,6 +906,62 @@ class MainWindow(QMainWindow):
         self.desktop_options_status.setText("Desktop options saved.")
         if self.engine_ready:
             self.engine.submit("desktop_policy", values["automatic_queue"])
+
+    def _art(self, page, width, height):
+        artwork = ThemeArt(page, width, height)
+        artwork.set_theme(self.theme)
+        self.theme_art.append(artwork)
+        return artwork
+
+    def _page_header(self, page, title, subtitle, action=None):
+        """Title and subtitle beside the page's themed artwork."""
+        header = QHBoxLayout()
+        header.setSpacing(18)
+        text = QVBoxLayout()
+        text.setSpacing(8)
+        text.addStretch()
+        text.addWidget(label(title, "title", True))
+        text.addWidget(label(subtitle, "muted", True))
+        if action is not None:
+            actions = QHBoxLayout()
+            actions.addWidget(action)
+            actions.addStretch()
+            text.addSpacing(4)
+            text.addLayout(actions)
+        text.addStretch()
+        header.addLayout(text, 1)
+        header.addWidget(self._art(page, 290, 104), 0, Qt.AlignmentFlag.AlignVCenter)
+        return header
+
+    def apply_theme(self, key):
+        self.theme = resolve_theme(key)
+        self.setStyleSheet(self.theme.stylesheet())
+        for artwork in self.theme_art:
+            artwork.set_theme(self.theme)
+        self._set_engine_state(self.engine_state)
+        if hasattr(self, "theme_description"):
+            self.theme_description.setText(self.theme.description)
+
+    def _theme_selected(self, index):
+        key = self.theme_picker.itemData(index)
+        previous = self.preferences.values["theme"]
+        if key == previous or key not in THEMES:
+            return
+        self.apply_theme(key)
+        try:
+            # Only the theme changes; other desktop options keep their saved values.
+            self.preferences.save({**self.preferences.values, "theme": key})
+        except (OSError, ValueError):
+            self.theme_picker.blockSignals(True)
+            self.theme_picker.setCurrentIndex(self.theme_picker.findData(previous))
+            self.theme_picker.blockSignals(False)
+            self.apply_theme(previous)
+            self.show_notice("Could not save the theme. Check that the app's data folder is writable.", persistent=True)
+
+    def _set_engine_state(self, state):
+        self.engine_state = state
+        color = {"online": "success", "stopped": "error"}.get(state)
+        self.engine_indicator.setStyleSheet(f"color: {self.theme.color(color)};" if color else "")
 
     def _hide_to_tray(self):
         if not self.closing and not self.system_tray.hide_window():
@@ -1358,7 +1342,7 @@ class MainWindow(QMainWindow):
         if self.system_tray.icon is not None:
             self.system_tray.pause_action.setEnabled(False)
         self.engine_indicator.setText("●  Engine stopped")
-        self.engine_indicator.setStyleSheet("color: #f0a3b0;")
+        self._set_engine_state("stopped")
         self.show_notice(message, persistent=True)
 
     def _engine_stopped(self):

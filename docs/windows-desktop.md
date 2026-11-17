@@ -1,7 +1,7 @@
 # Windows desktop edition
 
 This Windows fork packages the miner and a native desktop interface into
-`Twitch Drops Miner.exe` (desktop r11). Download the ZIP from this fork's
+`Twitch Drops Miner.exe` (desktop r12). Download the ZIP from this fork's
 [Releases](https://github.com/Cavad/TwitchDropsMiner/releases), extract it and run the
 executable from a permanent, writable folder.
 Close any older miner instance first. Python and Docker are not needed to run it.
@@ -55,6 +55,24 @@ watch-time budget finishes before the deadline; **At risk** means it does not.
 Times use the PC's local timezone. These are sequential planning estimates:
 pauses, mining schedules, offline streams, changing eligibility and Twitch delays
 can extend them, while simultaneous campaign progress can shorten them.
+
+## Themes
+
+Choose a theme in **Settings → Desktop behavior → Theme**. It applies immediately and
+is remembered on this PC; other unsaved desktop options are not saved with it.
+
+| Theme | Look |
+| --- | --- |
+| Midnight | The original violet night (default). |
+| Resonant Tide | Sea-glass teal, pale foam and gold, with rippling echoes. |
+| Neon Hollow | Acid yellow on black, hazard stripes, halftone and a retro TV. |
+| Office | Light theme: white surfaces, blue accents and flat document art. |
+| Starlit Rail | Deep indigo and gold, constellations and rails to the horizon. |
+| Anomaly City | Magenta and cyan neon over a night skyline with glitches. |
+
+Every page has its own artwork in every theme. The themes are original designs; some
+borrow the general mood of a game's visual style, but they contain no official names,
+logos, characters or art.
 
 ## Tray, notifications and Windows startup
 
