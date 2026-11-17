@@ -930,3 +930,22 @@ def test_buttons_keep_their_size_when_focused_and_connect_width_is_stable(window
     assert len(widths) == 1
     down, up = widget.control_arrows.paths(widget.theme.color("muted"))
     assert Path(down).is_file() and Path(up).is_file()
+
+
+def test_overview_artwork_hides_whenever_it_would_overflow(window, app):
+    widget, engine = window
+    widget.resize(1000, 720)
+    widget.show()
+    widget.connect_button.click()
+    engine.login_phase.emit("login")
+    # Reproduce the Windows case: artwork still visible after the window shrank.
+    widget.overview_scroll.artwork.show()
+    for _ in range(10):  # Let the deferred check and scroll-area relayout settle.
+        app.processEvents()
+    assert not widget.overview_scroll.artwork.isVisible()
+    assert widget.overview_scroll.widget().width() <= widget.overview_scroll.viewport().width()
+    widget.resize(1600, 900)
+    for _ in range(10):  # Let the deferred check and scroll-area relayout settle.
+        app.processEvents()
+    assert widget.overview_scroll.artwork.isVisible()
+    assert widget.overview_scroll.widget().width() <= widget.overview_scroll.viewport().width()

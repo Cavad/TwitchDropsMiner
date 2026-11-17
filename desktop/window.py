@@ -124,13 +124,45 @@ class ControlArrows:
 
 
 class OverviewScrollArea(QScrollArea):
+    """Shows the hero artwork only while the overview still fits without sideways overflow.
+
+    The fit depends on the system font (Windows' Segoe UI is wider than other fonts) and
+    on the sign-in buttons shown, so it is measured whenever the size or layout changes.
+    """
+
+    MIN_WIDTH = 840
+    GAP = 24  # Hero row spacing reserved next to the artwork.
+
     def __init__(self, artwork):
         super().__init__()
         self.artwork = artwork
+        self._pending = False
+
+    def setWidget(self, widget):
+        super().setWidget(widget)
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        relevant = event.type() in (QEvent.Type.LayoutRequest, QEvent.Type.Resize)
+        if watched is self.widget() and relevant and not self._pending:
+            self._pending = True
+            QTimer.singleShot(0, self.update_artwork)
+        return super().eventFilter(watched, event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.artwork.setVisible(self.viewport().width() >= 840)
+        self.update_artwork()
+
+    def update_artwork(self):
+        self._pending = False
+        content = self.widget()
+        available = self.viewport().width()
+        if content is None:
+            return
+        needed = content.minimumSizeHint().width()
+        if not self.artwork.isVisibleTo(content):
+            needed += self.artwork.width() + self.GAP
+        self.artwork.setVisible(available >= self.MIN_WIDTH and needed <= available)
 
 
 def application_icon() -> QIcon:
