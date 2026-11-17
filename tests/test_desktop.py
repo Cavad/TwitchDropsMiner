@@ -1061,3 +1061,72 @@ def test_application_lifecycle_and_bounded_engine_stop(app):
     assert not desktop_main.stop_engine(stuck, 5)
     stuck.stop.assert_called_once()
     stuck.wait.assert_called_once_with(5)
+
+
+def test_quit_completes_when_engine_stops_while_unsaved_prompt_is_open(window, monkeypatch):
+    """Review finding: the window stayed on 'Closing…' forever after Discard."""
+    from PySide6.QtWidgets import QMessageBox
+
+    widget, engine = window
+    quits = []
+    monkeypatch.setattr("desktop.window.QApplication.quit", lambda: quits.append(True))
+    monkeypatch.setattr("desktop.window.QTimer.singleShot", lambda ms, callback: callback() if ms == 0 else None)
+    running = [True]
+    engine.isRunning = lambda: running[0]
+    engine.stop = Mock()
+    widget.settings_dirty = True
+
+    def discard_after_engine_stops(*_args, **_kwargs):
+        running[0] = False
+        engine.finished.emit()  # Delivered while the question is still open.
+        return QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr("desktop.window.QMessageBox.question", discard_after_engine_stops)
+    widget._request_quit()
+    assert quits == [True]
+
+
+def test_watchdog_quits_even_if_the_engine_already_stopped(window, monkeypatch):
+    widget, engine = window
+    quits = []
+    monkeypatch.setattr("desktop.window.QApplication.quit", lambda: quits.append(True))
+    monkeypatch.setattr("desktop.window.QTimer.singleShot", lambda ms, callback: callback() if ms == 0 else None)
+    engine.isRunning = lambda: False
+    widget.closing = True
+    widget._shutdown_timeout()
+    assert quits == [True]
+    widget._shutdown_timeout()
+    assert quits == [True]
+
+
+def test_session_end_waits_briefly_for_the_engine_then_quits(window, monkeypatch):
+    widget, engine = window
+    quits = []
+    monkeypatch.setattr("desktop.window.QApplication.quit", lambda: quits.append(True))
+    monkeypatch.setattr("desktop.window.QTimer.singleShot", lambda ms, callback: callback() if ms == 0 else None)
+    running = [True]
+    engine.isRunning = lambda: running[0]
+    engine.stop = Mock()
+
+    def wait(ms):
+        assert ms <= 4_000  # Under Windows' blocking-shutdown limit.
+        running[0] = False
+        return True
+
+    engine.wait = wait
+    widget.prepare_session_end()
+    engine.stop.assert_called_once()
+    assert quits == [True]
+
+
+def test_ready_after_quit_keeps_the_closing_state(window):
+    widget, engine = window
+    engine.isRunning = lambda: True
+    engine.stop = Mock()
+    engine.commands.clear()
+    widget._request_quit()
+    engine.ready.emit()
+    assert widget.status_line.text().startswith("Closing the miner")
+    assert not widget.connect_button.isEnabled()
+    assert ("desktop_policy", True) not in engine.commands
+    engine.isRunning = lambda: False

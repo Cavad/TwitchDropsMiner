@@ -876,6 +876,8 @@ class MainWindow(QMainWindow):
         return page
 
     def _ready(self):
+        if self.closing:
+            return  # The engine came up after Quit; keep the closing state.
         self.engine_ready = True
         self.connect_button.setEnabled(True)
         self.export_button.setEnabled(True)
@@ -1062,10 +1064,22 @@ class MainWindow(QMainWindow):
         self.force_quit = True
         self.close()
 
+    # Windows shows its "app is blocking shutdown" screen after about five seconds.
+    SESSION_END_WAIT_MS = 4_000
+
     def prepare_session_end(self, *_args):
-        """Windows sign-out or shutdown: stop cleanly instead of hiding to the tray or asking."""
+        """Windows sign-out or shutdown: stop now, without hiding to the tray or asking.
+
+        Windows ends the process soon after this returns, so wait briefly for the engine
+        to save settings and release its browser before letting the session continue.
+        """
         self.session_ending = True
         self._request_quit()
+        wait = getattr(self.engine, "wait", None)
+        if self.engine.isRunning() and callable(wait):
+            wait(self.SESSION_END_WAIT_MS)
+        if not self.engine.isRunning():
+            self.close()
 
     def _quit_application(self):
         # Quit explicitly: Qt only quits on its own when the last *visible* window
@@ -1077,9 +1091,11 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, QApplication.quit)
 
     def _shutdown_timeout(self):
-        if self.engine.isRunning():
-            logging.getLogger("TwitchDrops.desktop").warning("Engine did not stop within %ss; exiting", self.SHUTDOWN_TIMEOUT_MS // 1000)
-            self.hide()
+        # Exit whatever happened: a stuck engine, or a stop the window never heard about.
+        if not self.quit_requested:
+            if self.engine.isRunning():
+                logging.getLogger("TwitchDrops.desktop").warning("Engine did not stop within %ss; exiting", self.SHUTDOWN_TIMEOUT_MS // 1000)
+            self.hide()  # A visible window that ignores its close would veto the quit.
             self._quit_application()
 
     def changeEvent(self, event):
@@ -1476,6 +1492,12 @@ class MainWindow(QMainWindow):
                 if answer != QMessageBox.StandardButton.Discard:
                     self.force_quit = False
                     event.ignore()
+                    return
+                if not self.engine.isRunning():
+                    # The engine stopped while the question was open; its finished
+                    # signal arrived before closing began, so nothing else will close.
+                    event.accept()
+                    self._quit_application()
                     return
             event.ignore()
             if not self.closing:
