@@ -971,3 +971,21 @@ def test_sign_in_timer_shows_in_the_hint_and_keeps_the_button_text(window, app):
     assert widget.connect_button.text() == "Waiting for Twitch…"
     assert widget.login_hint.text().endswith("0:00 elapsed")
     assert widget.login_hint.text().startswith("Sign in and complete Twitch verification")
+
+
+def test_sign_in_controls_fit_the_minimum_window_with_windows_button_widths(window, app):
+    """Windows' style measured Connect 312px, Finish sign-in 232px and Cancel ~132px wide."""
+    widget, engine = window
+    widget.resize(1000, 720)
+    widget.show()
+    widget.connect_button.click()
+    engine.login_phase.emit("login")
+    widget.connect_button.setMinimumWidth(312)
+    widget.finish_login.setMinimumWidth(232)
+    widget.cancel_login.setMinimumWidth(132)
+    for _ in range(10):
+        app.processEvents()
+    assert widget.overview_scroll.widget().width() <= widget.overview_scroll.viewport().width(), overview_widths(widget)
+    assert widget.finish_login.isVisible() and widget.cancel_login.isVisible()
+    connect_bottom = widget.connect_button.mapTo(widget, widget.connect_button.rect().bottomLeft()).y()
+    assert widget.finish_login.mapTo(widget, widget.finish_login.rect().topLeft()).y() > connect_bottom

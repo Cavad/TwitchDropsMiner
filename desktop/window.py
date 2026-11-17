@@ -384,10 +384,15 @@ class MainWindow(QMainWindow):
         self.finish_login = button("Finish sign-in", self._finish_login, name="finishLoginButton")
         self.finish_login.hide()
         actions.addWidget(self.connect_button)
-        actions.addWidget(self.finish_login)
-        actions.addWidget(self.cancel_login)
         actions.addStretch()
         details.addLayout(actions)
+        # Sign-in controls get their own row: side by side with Connect they need more
+        # width than the minimum window has with Windows' wider button metrics.
+        login_actions = QHBoxLayout()
+        login_actions.addWidget(self.finish_login)
+        login_actions.addWidget(self.cancel_login)
+        login_actions.addStretch()
+        details.addLayout(login_actions)
         self.login_hint = label("Secure browser sign-in · Session stored on this PC", "muted", True)
         self.login_hint.setStyleSheet("font-size: 12px;")
         details.addWidget(self.login_hint)
