@@ -148,7 +148,7 @@ def _sparkle(p: QPainter, x: float, y: float, size: float, color: QColor) -> Non
 def _midnight(p: QPainter, rect: QRectF, page: str, t: Theme, rng: random.Random) -> None:
     a = t.art
     cx, cy = rect.center().x(), rect.center().y()
-    s = min(rect.width(), rect.height()) * 0.27
+    s = min(rect.width(), rect.height()) * 0.235  # Outer ring (1.95 s) and sparkles stay inside.
     if rect.width() > rect.height() * 1.6:
         cx = rect.right() - rect.height() * 0.62
     p.setPen(QPen(_color(a["line"]), 1))

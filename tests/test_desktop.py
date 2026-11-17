@@ -1130,3 +1130,14 @@ def test_ready_after_quit_keeps_the_closing_state(window):
     assert not widget.connect_button.isEnabled()
     assert ("desktop_policy", True) not in engine.commands
     engine.isRunning = lambda: False
+
+
+def test_sidebar_buttons_take_focus_from_keyboard_only(window):
+    from PySide6.QtCore import Qt
+
+    widget, _ = window
+    assert all(nav.focusPolicy() == Qt.FocusPolicy.TabFocus for nav in widget.navigation)
+    widget.show()
+    widget.activateWindow()
+    QApplication.processEvents()
+    assert widget.focusWidget() not in widget.navigation

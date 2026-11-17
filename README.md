@@ -1,24 +1,65 @@
 # Twitch Drops Miner — Windows desktop fork
 
-This fork of [rangermix/TwitchDropsMiner](https://github.com/rangermix/TwitchDropsMiner)
-adds a native Windows interface with browser sign-in, automatic campaign discovery,
-session recovery, a mining queue with deadline estimates, tray controls and local
-notifications. The desktop interface is in English. Upstream attribution and the MIT
-license are preserved; desktop support belongs to this fork.
+A native Windows app that earns timed Twitch Drops for you. It finds eligible
+campaigns, picks live channels, tracks progress and claims rewards, without
+downloading stream video or audio. This is a fork of
+[rangermix/TwitchDropsMiner](https://github.com/rangermix/TwitchDropsMiner); upstream
+attribution and the MIT license are preserved, and desktop support belongs to this fork.
 
-Download the Windows ZIP from [Releases](https://github.com/Cavad/TwitchDropsMiner/releases),
-extract it and run **Twitch Drops Miner.exe**. See the
-[desktop guide](docs/windows-desktop.md) for sign-in and settings.
-The [Windows build workflow](https://github.com/Cavad/TwitchDropsMiner/actions/workflows/desktop-windows.yml)
-runs core regressions, native tests and a packaged smoke check before uploading its
-EXE archive and SHA256 checksum. Smoke checks do not establish live Twitch acceptance
-or real reward accrual.
+![Twitch Drops Miner desktop app: overview while mining](./assets/desktop/overview.png)
 
-Automatically earn timed Twitch Drops without downloading stream video or audio.
-Mining reads playlist metadata and checks segment response headers to keep bandwidth low.
+## Get started
 
-For the locally packaged Windows interface, see the [desktop guide](docs/windows-desktop.md)
-for sign-in, the automatic queue, tray controls and optional Windows startup.
+1. Download **Twitch-Drops-Miner-Desktop-Windows-x64.zip** from the
+   [latest release](https://github.com/Cavad/TwitchDropsMiner/releases/latest).
+2. Extract it to a permanent folder and run **Twitch Drops Miner.exe**. Python and
+   Docker are not needed.
+3. Select **Connect Twitch** and sign in through your own browser. Chrome, Chromium or
+   Firefox works for sign-in; Chrome or Chromium is needed to keep the session renewed.
+4. Add your games in **Settings → Mining list**. Changes save immediately.
+
+To update, choose **Quit and stop mining** in the tray, then extract and run the new
+version. Settings, session and claim history stay in
+`%LOCALAPPDATA%\TwitchDropsMinerDesktop`. The [desktop guide](docs/windows-desktop.md)
+covers sign-in, the queue, tray mode and Windows startup in detail.
+
+## What it does
+
+- **Finds and mines campaigns automatically.** Your Mining list sets the priority;
+  optionally other eligible games follow by deadline. Channels switch on their own.
+- **Plans the queue.** The Mining queue shows each reward's remaining watch time,
+  an estimated finish and its deadline.
+- **Explains what is wrong.** Games whose account is not linked are marked
+  **Account not linked** with a **Link account** button, and every campaign has
+  **Why am I not earning this?**.
+- **Keeps going.** It reconnects your saved session, rides out short internet or
+  Twitch outages, and shows an overnight recap and your claim history (CSV export).
+- **Stays out of the way.** Tray mode, optional launch at Windows sign-in, pause,
+  and local notifications for claims and session problems.
+- **Six themes.** Midnight, Resonant Tide, Neon Hollow, Office, Starlit Rail and
+  Anomaly City, each with its own artwork on every page (**Settings → Desktop
+  behavior → Theme**).
+
+![The six desktop themes](./assets/desktop/themes.png)
+
+| Mining queue | Campaigns | Settings |
+| --- | --- | --- |
+| ![Mining queue with finish estimates](./assets/desktop/mining-queue.png) | ![Campaigns with progress](./assets/desktop/campaigns.png) | ![Mining list with link status](./assets/desktop/settings.png) |
+
+Screenshots use sample data. The themes are original designs; some borrow the general
+mood of a game's visual style but contain no official names, logos, characters or art.
+
+Each release is built by the
+[Windows build workflow](https://github.com/Cavad/TwitchDropsMiner/actions/workflows/desktop-windows.yml),
+which runs the core and native Windows tests and a packaged smoke check before
+publishing the ZIP with a SHA256 checksum. Smoke checks do not prove Twitch accepts a
+session or that rewards accrue. The desktop interface is in English. This is a hobby
+project for personal use on your own PC.
+
+## Upstream web dashboard (Docker)
+
+The rest of this page describes the upstream web dashboard edition, which runs in
+Docker on a home server. The desktop app above does not need it.
 
 <p align="center">
   <a href="https://github.com/rangermix/TwitchDropsMiner/stargazers"><img src="https://img.shields.io/github/stars/rangermix/TwitchDropsMiner?style=for-the-badge&color=yellow" alt="GitHub stars"></a>
@@ -33,7 +74,7 @@ from a web dashboard. Run it on your own computer or home server. This hobby pro
 supports personal use on your own hardware and home network; third-party hosting and
 services operated for other users are outside its support scope.
 
-![Twitch Drops Miner web dashboard](./screenshot.png)
+![Twitch Drops Miner web dashboard (upstream)](./screenshot.png)
 
 - Choose and prioritize games, or let TDM discover available campaigns.
 - [Mine other eligible games as fallback](docs/usage.md#choose-games-and-priorities)

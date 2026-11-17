@@ -263,6 +263,10 @@ class MainWindow(QMainWindow):
         for page in (self._overview(), self._campaigns(), self._history(), self._activity(), self._settings(), self._queue_page()):
             self.pages.addWidget(page)
         layout.addWidget(content, 1)
+        # Start with focus on the content area, not the first sidebar button, so the
+        # window opens without a focus ring; clicking empty space clears one too.
+        content.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        content.setFocus(Qt.FocusReason.OtherFocusReason)
         self.status_line = label("Starting your local miner…", "muted")
         self.status_line.setMaximumHeight(35)
         body.addWidget(self.status_line)
@@ -309,6 +313,8 @@ class MainWindow(QMainWindow):
         for index, icon, text in ((0, '◫', 'Overview'), (5, '⇥', 'Mining queue'), (1, '◇', 'Campaigns'), (2, '◷', 'History'), (3, '≡', 'Activity'), (4, '⚙', 'Settings')):
             nav = button(f"{icon}    {text}", lambda checked=False, n=index: self.navigate(n), "nav", f"nav{text}")
             nav.setCheckable(True)
+            # Keyboard users get the focus ring; a mouse click should not leave one behind.
+            nav.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             nav.setProperty("page_index", index)
             nav.setChecked(index == 0)
             self.navigation.append(nav)
